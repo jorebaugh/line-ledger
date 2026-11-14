@@ -1,0 +1,15 @@
+# The public repository holds only the app. Tests stay on this computer:
+# their fixtures are built from real recaps and pay stubs.
+tests/
+.claude/
+
+# Never publish these, wherever they turn up.
+*.pdf
+*.env
+.env*
+*.key
+*.csv
+*.xlsx
+
+.DS_Store
+node_modules/
