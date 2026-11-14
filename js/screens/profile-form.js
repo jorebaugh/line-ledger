@@ -15,7 +15,7 @@ export function profileFormHTML(p = {}, { mode = 'intake' } = {}) {
   const ygMode = p.ygMode || 'doh';
   const ygOptions = Array.from({ length: 15 }, (_, i) => `<option value="${i + 1}" ${Number(p.yearGroup) === i + 1 ? 'selected' : ''}>Year group ${i + 1}</option>`).join('');
   const settings = mode === 'settings';
-  const moreOpen = settings && p.role ? 'open' : '';
+  const moreOpen = '';
   return `
   <form id="profile" class="stack" novalidate autocomplete="off">
     <fieldset class="field"><legend>Seat</legend>
@@ -48,6 +48,15 @@ export function profileFormHTML(p = {}, { mode = 'intake' } = {}) {
       ${seg('flying', [['domestic', 'Mostly domestic'], ['international', 'Mostly international']], p.flying)}
       <p class="hint">Pre-fills typical per diem and override. You can change every number later.</p></fieldset>
 
+    <fieldset class="field"><legend>Instructor or check airman</legend>
+      <div class="grid2">
+        <label class="f"><span>Role</span>
+          <select name="role"><option value="">No</option>${Object.entries(ROLES).map(([v, l]) => `<option value="${v}" ${p.role === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label class="f" data-role-year ${p.role ? '' : 'hidden'}><span>Year in the program</span>
+          <select name="roleYear">${[[1, 'Year 1'], [2, 'Year 2'], [3, 'Year 3'], [4, 'Year 4 and above']].map(([v, l]) => `<option value="${v}" ${Number(p.roleYear || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      </div>
+      <p class="hint" data-out="role"></p></fieldset>
+
     <details class="more" ${moreOpen}>
       <summary>Make it more accurate <span class="muted">(optional)</span></summary>
       ${settings ? '' : `<div class="grid2">
@@ -63,13 +72,6 @@ export function profileFormHTML(p = {}, { mode = 'intake' } = {}) {
       ${settings ? '' : `<label class="f"><span>Other deductions per check</span>
         <input name="otherDed" inputmode="decimal" value="${esc(p.otherDed || '')}" placeholder="$0.00" autocomplete="off"></label>
       <p class="hint">Insurance, medical, dental and the like: everything except 401(k), dues and taxes. Later you can add a pay stub (PDF or text) in Settings to fill these in.</p>`}
-      <div class="grid2">
-        <label class="f"><span>Instructor or check airman</span>
-          <select name="role"><option value="">No</option>${Object.entries(ROLES).map(([v, l]) => `<option value="${v}" ${p.role === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-        <label class="f"><span>Year in the program</span>
-          <select name="roleYear">${[[1, 'Year 1'], [2, 'Year 2'], [3, 'Year 3'], [4, 'Year 4 and above']].map(([v, l]) => `<option value="${v}" ${Number(p.roleYear || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      </div>
-      <p class="hint" data-out="role"></p>
       <fieldset class="field"><legend>Commuter</legend>
         ${seg('commuter', [['yes', 'Yes'], ['no', 'No']], p.commuter || 'no', { cls: 'seg-small' })}</fieldset>
       ${settings ? '' : '<p class="hint">Withholding is your total from a recent stub (federal + state + FICA) as a percent of gross. Leave blank and the estimate assumes 30%.</p>'}
@@ -146,7 +148,9 @@ export function bindProfileForm(form) {
       const v = role ? rctx.rule.role.value : null;
       const table = role === 'ip' ? v?.ip : role === 'fps' ? v?.fps : v?.ca;
       const y = Math.min(4, Number(fd.get('roleYear')) || 1);
-      roleHint.textContent = role ? `${formatMoney(Math.round((table[y - 1] + (role === 'sca' ? v.scaApdExtra : 0)) * 100))} per bid period on top of your line (${role === 'ip' ? 'Sec. 11.N.25.e' : role === 'fps' ? 'Sec. 9.E.2.a' : role === 'sca' ? 'Sec. 11.M.17.i + 11.M.29' : 'Sec. 11.M.17.i'}).` : '';
+      roleHint.textContent = role ? `${formatMoney(Math.round((table[y - 1] + (role === 'sca' ? v.scaApdExtra : 0)) * 100))} per bid period on top of your line (${role === 'ip' ? 'Sec. 11.N.25.e' : role === 'fps' ? 'Sec. 9.E.2.a' : role === 'sca' ? 'Sec. 11.M.17.i + 11.M.29' : 'Sec. 11.M.17.i'}). The Pay screen also gets a pay-only line option.` : 'Adds your bid period override and a pay-only line option on the Pay screen.';
+      const yr = form.querySelector('[data-role-year]');
+      if (yr) yr.hidden = !role;
     }
     if (mode === 'doh' && !p.doh) { hint.textContent = ''; return; }
     const code = periodFromISO(todayISO());

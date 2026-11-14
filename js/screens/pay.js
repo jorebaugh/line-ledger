@@ -361,7 +361,7 @@ export default {
       <section class="card">
         <div class="row-head"><h2>Guarantee (${v.c.gLabel})</h2>${seg('weeks-p', [['4', '4 wk'], ['5', '5 wk'], ['6', '6 wk']], String(v.c.weeks), { attrs: 'data-p="weeks"', cls: 'seg-small seg-inline' })}</div>
         ${app.state.profile.role || cur.payOnly ? `<label class="check"><input type="checkbox" data-p="payOnly" ${cur.payOnly ? 'checked' : ''}><span>Pay-only line this bid period <small>instructional bid period</small></span></label>
-        ${cur.payOnly ? `<p class="hint">Paid the ${v.c.gLabel} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : ''}
+        ${cur.payOnly ? `<p class="hint">Paid the ${v.c.gLabel} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : '<p class="hint">Instructor or check airman? <a href="#/settings">Turn it on in Settings</a> for your override and the pay-only line option.</p>'}
         <label class="f"><span>Your awarded ${cur.payOnly ? 'pay-only line ' : ''}${v.c.gLabel} (credit hours)</span>
           <input data-p="guarantee" value="${esc(cur.guarantee)}" placeholder="${v.c.guarantee.source === 'typical' ? `${esc(app.state.profile.lineValue)} typical` : `${H(v.c.guarantee.minMinutes)} minimum`}" autocomplete="off" spellcheck="false"></label>
         ${o('guarantee')}
