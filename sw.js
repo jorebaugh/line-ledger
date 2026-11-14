@@ -1,6 +1,6 @@
 // Offline support. The whole app is cached as one version, so a phone never mixes old and new files.
 // When you change any file, bump APP_VERSION in config.js and VERSION here to match (a test checks).
-const VERSION = 'line-ledger-0.6.3';
+const VERSION = 'line-ledger-0.7.0';
 const FILES = [
   './',
   'index.html',

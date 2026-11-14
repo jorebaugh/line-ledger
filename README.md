@@ -11,7 +11,11 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
 - Pay math (`js/paymath.js`), bank math (`js/banks.js`), the trip recap reader (`js/recap.js`), the pay stub
   reader (`js/stub.js`), the 401(k) tracker (`js/k401.js`) and the retirement comparison (`js/retire.js`): pure
   functions, integer cents and minutes, with unit tests.
-- Intake (with optional line value, instructor/check airman role, other deductions per check), Home,
+- First-time setup is five questions, one per screen with big buttons (`js/screens/intake.js`); line value,
+  instructor/check airman role and deductions have defaults and live in Settings. Home shows the next check,
+  three numbered steps and a short action list. Pay shows the checks, your line, your trips and other pay; the
+  what-if slider, last period, breakdown, stub check and history are folded sections. A trip shows four fields,
+  with the rest under "More". Home,
   Pay estimator: guarantee, trips (line 100%, VLT/DRF/AVA 150%, CMU 150%, PMU/SMU 125%, reserve) with OSC,
   BKO and overage from duty-period block times, paste a Trip Recap, quick add-ons, what-if draft (slider or
   typed hours), 15th / last-day / next-15th checks (next month's line value optional), stub audit, history

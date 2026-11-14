@@ -1,6 +1,6 @@
-// Pay estimator: guarantee, trips, quick add-ons, the what-if slider, the checks,
-// audit against a stub, and saved history. Inputs render once; figures refresh in place
-// (elements marked data-out) so typing never loses focus.
+// Pay: the checks, your line, your trips and other pay up front; the what-if slider, last period,
+// the breakdown, the stub check and history fold away until opened. Inputs render once; figures
+// refresh in place (elements marked data-out) so typing never loses focus.
 
 import {
   todayISO, periodFromISO, periodName, periodIndex, shiftPeriod, formatDate, parseHours, parseMoney,
@@ -18,6 +18,10 @@ import { feedbackCard } from './feedback.js';
 import { esc, seg, confirmPill, openSheet, toast, ICON } from '../ui.js';
 
 const openTrips = new Set();
+const openMore = new Set(); // trips whose "More" section is open
+const openFolds = new Set(); // folded sections the user opened
+let pendingGo = null; // section to jump to, from a Home link like #/pay?go=trips
+const GO_FOLD = { whatif: 'whatif', stub: 'audit' };
 const viewCode = (app) => app.state.viewCode || periodFromISO(todayISO());
 
 /* ----------------------------------------------------------------- outputs */
@@ -84,7 +88,6 @@ function lastPeriodHTML(x, v) {
   const presetOnly = prevP && prevP.trips.length === 0 && prevP.rows.length > 0 && prevP.rows.every((r) => r.preset);
   const lines = p ? extrasLines(p) : [];
   return `
-    <div class="row-head"><h2>From ${periodName(prevCode)}</h2><span class="muted small">paid ${formatDate(checks.mid.date)}</span></div>
     ${lines.length ? `<ul class="ledger">${lines.map((l) => `<li><span>${esc(l.label)}</span>${x.money(l.cents, { title: l.label, lines: [l] }, { mark: false })}</li>`).join('')}
       <li class="sum"><span>Extras from ${monthShort(prevCode)}</span>${x.money(p.extrasCents, { title: `${periodName(prevCode)} extras`, lines, total: { label: 'Total', cents: p.extrasCents } }, { mark: false })}</li></ul>`
     : `<p class="muted">Nothing above guarantee entered for ${periodName(prevCode)}.</p>`}
@@ -100,7 +103,6 @@ function totalsHTML(x, v) {
   const bkoMin = c.trips.reduce((s, t) => s + (t.bkoMin || 0), 0);
   const bkoCents = c.trips.reduce((s, t) => s + t.items.filter((i) => i.label.startsWith('Block override') && i.kind === 'onTop').reduce((a, i) => a + i.cents, 0), 0);
   return `
-    <h2>${periodName(code)} breakdown</h2>
     <ul class="ledger">
       <li><span>Guarantee (${c.gLabel}) ${H(c.guarantee.minutes)}</span>${x.money(c.guarantee.cents, guaranteeExplain(c, ctx), { mark: false })}</li>
       ${c.excess ? `<li><span>${esc(c.excess.label)}</span>${x.money(c.excess.cents, itemExplain(c.excess), { mark: false })}</li>` : ''}
@@ -149,8 +151,7 @@ function historyHTML(x, app, v) {
   }).join('');
   const isSaved = v.cur.saved;
   return `
-    <div class="row-head"><h2>History</h2>
-      <button type="button" class="btn small ${isSaved ? 'ghost' : 'primary'}" data-act="save-period">${isSaved ? 'Saved · remove' : `Save ${periodName(v.code)}`}</button></div>
+    <button type="button" class="btn wide ${isSaved ? '' : 'primary'}" data-act="save-period">${isSaved ? `${periodName(v.code)} is saved · tap to remove` : `Save ${periodName(v.code)} to history`}</button>
     ${saved.length ? `
       <p class="ytd">YTD gross ${year}: ${x.money(ytd, { title: `YTD gross ${year}`, lines: ytdLines, total: { label: 'Total', cents: ytd }, notes: ['Both checks of each saved bid period in this calendar year. Unsaved periods are not counted.'] }, { cls: 'num', mark: false })} <span class="muted small">(saved periods)</span></p>
       <ul class="ledger history">${rows}</ul>` : '<p class="muted small">Save bid periods to build a history and a year-to-date total.</p>'}`;
@@ -219,6 +220,10 @@ function tripCard(t, code, payOnly = false) {
   const id = t.id;
   const open = openTrips.has(id);
   const bkoField = t.bkoMode === 'actual' ? 'actual' : 'bko';
+  const kinds = payOnly
+    ? [['line', 'M/U (100%)'], ['draft', 'VLT / DRF / AVA (150%)'], ['cmu', 'CMU (150%)'], ['pmu', 'PMU / SMU (125%)']]
+    : [['line', 'Line trip (100%)'], ['draft', 'VLT / DRF / AVA (150%)'], ['cmu', 'CMU (150%)'], ['pmu', 'PMU / SMU (125%)'], ['reserve', 'Reserve']];
+  const kind = payOnly && t.assign === 'reserve' ? 'line' : t.assign;
   return `
   <article class="trip ${open ? 'open' : ''}" data-trip="${id}">
     <div class="trip-head" data-act="toggle-trip" role="button" tabindex="0" aria-expanded="${open}">
@@ -227,30 +232,28 @@ function tripCard(t, code, payOnly = false) {
       ${ICON.chevron}
     </div>
     <div class="trip-body" ${open ? '' : 'hidden'}>
-      <label class="f"><span>Label</span><input data-f="label" value="${esc(t.label)}" placeholder="e.g. MEM–ANC–HKG" autocomplete="off"></label>
-      <div class="f"><span>Assignment</span>${payOnly
-        ? seg(`assign-${id}`, [['line', 'M/U'], ['draft', 'VLT/DRF/AVA'], ['cmu', 'CMU'], ['pmu', 'PMU/SMU']], t.assign === 'reserve' ? 'line' : t.assign, { attrs: 'data-f="assign"', cls: 'seg-small' })
-        : seg(`assign-${id}`, [['line', 'Line'], ['draft', 'VLT/DRF/AVA'], ['cmu', 'CMU'], ['pmu', 'PMU/SMU'], ['reserve', 'Rsv']], t.assign, { attrs: 'data-f="assign"', cls: 'seg-small' })}
-        <p class="hint">${esc(assignInfo(t.assign, payOnly).label)}: ${esc(assignInfo(t.assign, payOnly).codes)}${payOnly ? '. Paid on top of your pay-only line.' : ''}</p></div>
-      <div class="f"><span>Flying ${confirmPill}</span>${seg(`intl-${id}`, [['0', 'Domestic'], ['1', 'International']], t.intl ? '1' : '0', { attrs: 'data-f="intl"', cls: 'seg-small' })}</div>
-      <div class="grid2">
-        ${hoursInput('sched', t.sched, '30:00', 'Trip guarantee CH')}
-        ${hoursInput('away', t.away, '96:00', 'Time away (TAFB)')}
-      </div>
-      <div class="f"><span>Block override (4.FF) <b class="bko-val" data-out="trip-bko-${id}"></b></span>
-        ${seg(`bkoMode-${id}`, [['block', 'Block times'], ['actual', 'Actual credit'], ['bko', 'BKO hours']], t.bkoMode || 'bko', { attrs: 'data-f="bkoMode"', cls: 'seg-small' })}
-        ${t.bkoMode === 'block' ? dutyPeriodsHTML(t) : `<input class="mt" data-f="${bkoField}" value="${esc(t[bkoField] ?? '')}" placeholder="${bkoField === 'actual' ? 'Actual credit (OSC), e.g. 32:15' : 'BKO CH, e.g. 2:15'}" autocomplete="off" spellcheck="false" aria-label="${bkoField === 'actual' ? 'Actual credit hours' : 'BKO credit hours'}">`}
-      </div>
-      <div class="grid2 align-end">
+      <label class="f"><span>Type of trip</span>
+        <select data-f="assign">${kinds.map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <p class="hint">Pay codes: ${esc(assignInfo(t.assign, payOnly).codes)}${payOnly ? '. Paid on top of your pay-only line.' : ''}</p>
+      <div class="f"><span>Flying ${confirmPill}</span>${seg(`intl-${id}`, [['0', 'Domestic'], ['1', 'International']], t.intl ? '1' : '0', { attrs: 'data-f="intl"' })}</div>
+      ${hoursInput('sched', t.sched, 'e.g. 30:00', 'Credit hours (trip guarantee)')}
+      ${hoursInput('away', t.away, 'e.g. 96:00', 'Hours away from base (TAFB)')}
+      <details class="more" data-more="${id}" ${openMore.has(id) ? 'open' : ''}>
+        <summary>More: block override, overage, trip name</summary>
+        <label class="f"><span>Trip name</span><input data-f="label" value="${esc(t.label)}" placeholder="e.g. MEM–ANC–HKG" autocomplete="off"></label>
+        <div class="f"><span>Block override (4.FF) <b class="bko-val" data-out="trip-bko-${id}"></b></span>
+          ${seg(`bkoMode-${id}`, [['block', 'Block times'], ['actual', 'Actual credit'], ['bko', 'BKO hours']], t.bkoMode || 'bko', { attrs: 'data-f="bkoMode"', cls: 'seg-small' })}
+          ${t.bkoMode === 'block' ? dutyPeriodsHTML(t) : `<input class="mt" data-f="${bkoField}" value="${esc(t[bkoField] ?? '')}" placeholder="${bkoField === 'actual' ? 'Actual credit (OSC), e.g. 32:15' : 'BKO CH, e.g. 2:15'}" autocomplete="off" spellcheck="false" aria-label="${bkoField === 'actual' ? 'Actual credit hours' : 'BKO credit hours'}">`}
+        </div>
         ${hoursInput('overage', t.overage, '0:00', 'Overage CH')}
-        <label class="check"><input type="checkbox" data-f="overageShort" ${t.overageShort ? 'checked' : ''}><span>2 hrs or less into days off</span></label>
-      </div>
-      <label class="check"><input type="checkbox" data-f="ulr" ${t.ulr ? 'checked' : ''}><span>ULR: a segment scheduled over 16 block hours</span></label>
-      <div class="f" ${t.intl ? '' : 'hidden'}><span>Grid penalty events (4.EE)</span>
-        <select data-f="gpeCount">${[[0, 'None'], [1, '1'], [2, '2'], [3, '3 or more']].map(([v, l]) => `<option value="${v}" ${Number(t.gpeCount) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <label class="check mt"><input type="checkbox" data-f="gpeSame48" ${t.gpeSame48 ? 'checked' : ''}><span>All of them touch one 48-hour period</span></label>
-      </div>
-      ${periodSelect(code, code)}
+        <label class="check"><input type="checkbox" data-f="overageShort" ${t.overageShort ? 'checked' : ''}><span>Overage was 2 hrs or less into days off</span></label>
+        <label class="check"><input type="checkbox" data-f="ulr" ${t.ulr ? 'checked' : ''}><span>ULR: a segment scheduled over 16 block hours</span></label>
+        <div class="f" ${t.intl ? '' : 'hidden'}><span>Grid penalty events (4.EE)</span>
+          <select data-f="gpeCount">${[[0, 'None'], [1, '1'], [2, '2'], [3, '3 or more']].map(([v, l]) => `<option value="${v}" ${Number(t.gpeCount) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <label class="check mt"><input type="checkbox" data-f="gpeSame48" ${t.gpeSame48 ? 'checked' : ''}><span>All of them touch one 48-hour period</span></label>
+        </div>
+        ${periodSelect(code, code)}
+      </details>
       <div data-out="trip-math-${id}"></div>
       <div class="actions"><button type="button" class="btn ghost small" data-act="dup-trip">Duplicate</button><button type="button" class="btn ghost small danger" data-act="del-trip">Remove</button></div>
     </div>
@@ -274,7 +277,7 @@ function rowCard(r, code, gMin) {
     ${fields}
     ${t?.gpe ? `<label class="check"><input type="checkbox" data-f="gpe" ${r.gpe ? 'checked' : ''}><span>3+ grid penalty events (+50%)</span></label>` : ''}
     <div data-out="row-math-${r.id}"></div>
-    ${periodSelect(code, code)}
+    <details class="more"><summary>Move to another bid period</summary>${periodSelect(code, code)}</details>
   </article>`;
 }
 
@@ -334,6 +337,20 @@ export default {
     const shownRows = cur.rows.filter((r) => !v.c.hiddenRowIds.includes(r.id));
     const isToday = code === periodFromISO(todayISO());
 
+    // A Home link like #/pay?go=whatif opens that section and jumps to it.
+    const go = new URLSearchParams(location.hash.split('?')[1] || '').get('go');
+    if (go) {
+      pendingGo = go;
+      if (GO_FOLD[go]) openFolds.add(GO_FOLD[go]);
+      history.replaceState(null, '', '#/pay');
+    }
+    const fold = (key, title, sub, body) => `
+      <details class="card fold" data-fold="${key}" data-sec="${key}" ${openFolds.has(key) ? 'open' : ''}>
+        <summary><span class="act-t"><b>${title}</b>${sub ? `<small class="muted">${sub}</small>` : ''}</span>${ICON.chevron}</summary>
+        <div class="fold-body">${body}</div>
+      </details>`;
+    const g = v.c.gLabel;
+
     const html = `
       <div class="period-nav">
         <button type="button" class="icon-btn" data-act="shift" data-n="-1" aria-label="Previous bid period">${ICON.left}</button>
@@ -345,52 +362,55 @@ export default {
       </div>
       ${o('rate', 'p', 'rate-line')}
 
-      <section class="card">${o('checks')}
-        <label class="f mt"><span>${periodName(v.nextCode)} line value <span class="muted">(optional, shows the whole ${formatDate(v.checks.next.date)} check)</span></span>
-          <input data-p="nextGuarantee" value="${esc(app.state.periods[v.nextCode]?.guarantee || '')}" placeholder="e.g. 72:30" autocomplete="off" spellcheck="false"></label>
-      </section>
+      <section class="card">${o('checks')}</section>
 
-      <section class="card whatif">
-        <div class="row-head"><h2>What if I pick up a draft?</h2>
-          <label class="wi-hours"><span>+</span><input class="wi-input num" data-p="whatIfTyped" inputmode="decimal" autocomplete="off" spellcheck="false" value="${cur.whatIf ? H(cur.whatIf) : ''}" placeholder="0:00" aria-label="Draft credit hours"><span>CH</span></label></div>
-        <input type="range" min="0" max="2400" step="30" value="${Math.min(2400, cur.whatIf || 0)}" data-p="whatIf" aria-label="Draft hours to add">
-        <div class="range-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40 CH</span></div>
-        ${o('whatif')}
-      </section>
-
-      <section class="card">
-        <div class="row-head"><h2>Guarantee (${v.c.gLabel})</h2>${seg('weeks-p', [['4', '4 wk'], ['5', '5 wk'], ['6', '6 wk']], String(v.c.weeks), { attrs: 'data-p="weeks"', cls: 'seg-small seg-inline' })}</div>
-        ${app.state.profile.role || cur.payOnly ? `<label class="check"><input type="checkbox" data-p="payOnly" ${cur.payOnly ? 'checked' : ''}><span>Pay-only line this bid period <small>instructional bid period</small></span></label>
-        ${cur.payOnly ? `<p class="hint">Paid the ${v.c.gLabel} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : '<p class="hint">Instructor or check airman? <a href="#/settings">Turn it on in Settings</a> for your override and the pay-only line option.</p>'}
-        <label class="f"><span>Your awarded ${cur.payOnly ? 'pay-only line ' : ''}${v.c.gLabel} (credit hours)</span>
+      <section class="card" data-sec="line">
+        <div class="row-head"><h2><span class="step-n" aria-hidden="true">1</span> Your line</h2>${seg('weeks-p', [['4', '4 wk'], ['5', '5 wk'], ['6', '6 wk']], String(v.c.weeks), { attrs: 'data-p="weeks"', cls: 'seg-small seg-inline' })}</div>
+        <label class="f"><span>Your awarded ${cur.payOnly ? 'pay-only line ' : ''}${g}, in credit hours</span>
           <input data-p="guarantee" value="${esc(cur.guarantee)}" placeholder="${v.c.guarantee.source === 'typical' ? `${esc(app.state.profile.lineValue)} typical` : `${H(v.c.guarantee.minMinutes)} minimum`}" autocomplete="off" spellcheck="false"></label>
+        <p class="hint">From your bid package, like 72:30. Leave it blank to use the minimum.</p>
         ${o('guarantee')}
+        ${app.state.profile.role || cur.payOnly ? `<label class="check"><input type="checkbox" data-p="payOnly" ${cur.payOnly ? 'checked' : ''}><span>Pay-only line this bid period <small>instructional bid period</small></span></label>
+        ${cur.payOnly ? `<p class="hint">Paid the ${g} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : '<p class="hint">Instructor or check airman? <a href="#/settings">Set it in Settings</a>.</p>'}
+        <details class="more">
+          <summary>Know your ${periodName(v.nextCode)} line value?</summary>
+          <label class="f"><span>${periodName(v.nextCode)} line value <span class="muted">(shows the whole ${formatDate(v.checks.next.date)} check)</span></span>
+            <input data-p="nextGuarantee" value="${esc(app.state.periods[v.nextCode]?.guarantee || '')}" placeholder="e.g. 72:30" autocomplete="off" spellcheck="false"></label>
+        </details>
       </section>
 
-      <section class="card">
-        <div class="row-head"><h2>Trips</h2>
-          <span class="btn-pair"><button type="button" class="btn small" data-act="paste-recap">Paste recap</button><button type="button" class="btn small primary" data-act="add-trip">+ Add trip</button></span></div>
-        <p class="muted small">${cur.payOnly ? 'Trips you pick up on top of your pay-only line: M/U, VLT/DRF/AVA, CMU, PMU/SMU.' : 'Optional, for exact math.'} Once you add a trip, per diem and override come from your trips.</p>
+      <section class="card" data-sec="trips">
+        <h2><span class="step-n" aria-hidden="true">2</span> Your trips</h2>
+        <p class="hint">${cur.payOnly ? 'Trips you pick up on top of your pay-only line.' : 'Add each trip you fly this bid period.'} Per diem and override then come from your trips.</p>
+        <button type="button" class="btn primary big wide" data-act="paste-recap">Paste a trip recap</button>
+        <p class="hint center">Fastest: copy the Trip Recap page and paste it. The app fills in the trip.</p>
+        <button type="button" class="btn wide" data-act="add-trip">Or type a trip in</button>
         <div class="trips">${cur.trips.map((t) => tripCard(t, code, !!cur.payOnly)).join('')}</div>
       </section>
 
-      <section class="card">
-        <div class="row-head"><h2>Quick add-ons</h2><button type="button" class="btn small" data-act="add-row">+ Add</button></div>
-        <div class="addons">${shownRows.map((r) => rowCard(r, code, v.c.guarantee.minutes)).join('') ||'<p class="muted small">Drafts, reserve, overage, PMU, per diem, override and more.</p>'}</div>
+      <section class="card" data-sec="other">
+        <h2>Other pay</h2>
+        <p class="hint">Anything not tied to a trip above: draft or overage hours, reserve credit, per diem, a dollar adjustment.</p>
+        <div class="addons">${shownRows.map((r) => rowCard(r, code, v.c.guarantee.minutes)).join('')}</div>
         ${o('hidden')}
+        <button type="button" class="btn wide mt" data-act="add-row">Add other pay</button>
       </section>
 
-      <section class="card">${o('last')}</section>
-      <section class="card">${o('totals')}</section>
-
-      <section class="card">
-        <h2>Check a pay stub</h2>
-        ${seg('audit-check', [['mid', `${formatDate(v.checks.mid.date)} check`], ['end', `${formatDate(v.checks.end.date)} check`]], cur.audit?.check || 'mid', { attrs: 'data-a="check"', cls: 'seg-small' })}
+      ${fold('audit', '<span class="step-n" aria-hidden="true">3</span> Check a pay stub', 'Type the gross from your stub to compare', `
+        ${seg('audit-check', [['mid', `${formatDate(v.checks.mid.date)} check`], ['end', `${formatDate(v.checks.end.date)} check`]], cur.audit?.check || 'mid', { attrs: 'data-a="check"' })}
         <label class="f mt"><span>Gross on your stub</span><input data-a="actual" value="${esc(cur.audit?.actual || '')}" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>
-        ${o('audit')}
-      </section>
+        ${o('audit')}`)}
+      ${fold('whatif', 'What if I pick up a draft?', 'Pick the hours and watch the check change', `
+        <div class="whatif">
+          <label class="wi-hours"><span>Draft hours</span><input class="wi-input num" data-p="whatIfTyped" inputmode="decimal" autocomplete="off" spellcheck="false" value="${cur.whatIf ? H(cur.whatIf) : ''}" placeholder="0:00" aria-label="Draft credit hours"><span>CH</span></label>
+          <input type="range" min="0" max="2400" step="30" value="${Math.min(2400, cur.whatIf || 0)}" data-p="whatIf" aria-label="Draft hours to add">
+          <div class="range-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40 CH</span></div>
+          ${o('whatif')}
+        </div>`)}
 
-      <section class="card">${o('history')}</section>
+      ${fold('last', `From ${periodName(v.prevCode)}`, `Extras paid on the ${formatDate(v.checks.mid.date)} check`, o('last'))}
+      ${fold('totals', `${periodName(code)} breakdown`, 'Every line that makes up this bid period', o('totals'))}
+      ${fold('history', 'History', 'Saved bid periods and year to date', o('history'))}
       ${feedbackCard('Pay screen')}`;
 
     // Fill trip and row outputs (keys created per entry).
@@ -526,7 +546,7 @@ export default {
         const t = newTrip(state, state.profile);
         p.trips.push(t);
         openTrips.add(t.id);
-        rerender(`[data-trip="${t.id}"] input[data-f="label"]`);
+        rerender(`[data-trip="${t.id}"] input[data-f="sched"]`);
       } else if (a === 'paste-recap') {
         openSheet('Paste a trip recap', `
           <p class="small muted">Copy the whole Trip Recap (or pairing) page and paste it here. It's read on this phone only. Names and employee numbers are ignored and never saved.</p>
@@ -592,7 +612,7 @@ export default {
         const t = { ...src, id: state.nextId++, label: src.label ? `${src.label} (copy)` : '', dps: (src.dps || []).map((d) => ({ ...d, id: state.nextId++ })) };
         p.trips.splice(p.trips.indexOf(src) + 1, 0, t);
         openTrips.add(t.id);
-        rerender(`[data-trip="${t.id}"] input[data-f="label"]`);
+        rerender(`[data-trip="${t.id}"] input[data-f="sched"]`);
       } else if (a === 'del-trip') {
         const id = b.closest('[data-trip]').dataset.trip;
         p.trips = p.trips.filter((t) => String(t.id) !== String(id));
@@ -625,6 +645,25 @@ export default {
       }
     };
     el.addEventListener('click', act);
+    // <details> toggles don't bubble: listen on the way down. Remember what's open across re-renders.
+    el.addEventListener('toggle', (e) => {
+      const d = e.target;
+      if (d.dataset?.fold) { if (d.open) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold); }
+      if (d.dataset?.more) { const id = Number(d.dataset.more); if (d.open) openMore.add(id); else openMore.delete(id); }
+    }, true);
+    if (pendingGo) {
+      const want = pendingGo === 'stub' ? 'audit' : pendingGo;
+      pendingGo = null;
+      setTimeout(() => {
+        const sec = el.querySelector(`[data-sec="${want}"]`);
+        if (!sec) return;
+        sec.scrollIntoView({ block: 'start' });
+        window.scrollBy(0, -64);
+        sec.classList.add('flash');
+        if (want === 'line') sec.querySelector('[data-p="guarantee"]')?.focus({ preventScroll: true });
+        setTimeout(() => sec.classList.remove('flash'), 1600);
+      }, 0);
+    }
     el.addEventListener('keydown', (e) => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-act="toggle-trip"]')) { e.preventDefault(); act(e); }
     });

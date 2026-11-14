@@ -15,6 +15,7 @@ export default {
   mount(el, app) {
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-install]')) { promptInstall().then(() => app.render({ keepScroll: true })); return; }
+      if (e.target.closest('[data-guide-dismiss]')) { app.state.guide = 'dismissed'; app.save(); app.render({ keepScroll: true }); return; }
       if (e.target.closest('[data-install-dismiss]')) { app.state.installHint = 'dismissed'; app.save(); app.render({ keepScroll: true }); return; }
       const a = e.target.closest('[data-tab-to]');
       if (!a) return;
@@ -44,11 +45,31 @@ export default {
     const p = app.state.profile;
     const eligible = p.ygMode === 'doh' && p.doh ? p.doh < ret.eligibleHiredBefore : null;
 
+    const curP = app.state.periods[code] || {};
+    const steps = [
+      { done: !!String(curP.guarantee || '').trim(), href: '#/pay?go=line', t: 'Enter your line value', s: `Your ${c.gLabel} from the bid package` },
+      { done: (curP.trips || []).length > 0, href: '#/pay?go=trips', t: 'Add your trips', s: 'Paste a trip recap, or type the hours' },
+      { done: !!String(curP.audit?.actual || '').trim(), href: '#/pay?go=stub', t: 'Check it against your pay stub', s: 'Type the gross from your stub' },
+    ];
+    const showGuide = app.state.guide !== 'dismissed' && steps.some((st) => !st.done);
+    const act = (href, title, sub, right = '', attrs = '', tone = 'muted') => `
+        <a class="act" href="${href}" ${attrs}>
+          <span class="act-t"><b>${title}</b><small class="${tone}">${sub}</small></span>
+          ${right ? `<span class="act-v num">${right}</span>` : ''}${ICON.right}
+        </a>`;
+
+    const sim = bankSnapshot(app.state, code);
+    const rec = sim.periods.get(code);
+    const expiring = (rec?.balances || []).filter((b) => b.kind === 'new' && b.periodsLeft <= 1);
+    const over = rec?.outOfPocketCents || 0;
+    const k = k401View(app.state);
+    const kAlert = k.flags.find((f) => f.tone === 'alert');
+
     return `
       <section class="card hero">
-        <div class="eyebrow">Next check · ${formatDate(nc.date, { year: true })} · ${when}</div>
+        <div class="eyebrow">Your next check · ${formatDate(nc.date, { year: true })} · ${when}</div>
         <div class="hero-amt">${x.money(ck.grossCents, checkExplain(v, which), { cls: 'big', mark: false })}</div>
-        <div class="hero-sub">≈ ${x.money(n.netCents, netExplain(n, ck.grossCents, ck.perDiemCents, `${formatDate(nc.date)} est. net`, ctx), { cls: 'num' })} est. net <span class="muted">(rough)</span></div>
+        <div class="hero-sub">About ${x.money(n.netCents, netExplain(n, ck.grossCents, ck.perDiemCents, `${formatDate(nc.date)} est. net`, ctx), { cls: 'num' })} take-home <span class="muted">(rough)</span></div>
         <div class="pair">
           <div class="mini ${which === 'mid' ? 'is-next' : ''}">
             <span class="mini-label">${formatDate(checks.mid.date)}</span>
@@ -61,60 +82,49 @@ export default {
             <span class="mini-note">½ ${c.gLabel}</span>
           </div>
         </div>
-        <a class="btn primary" href="#/pay">Open the pay estimator</a>
+        <p class="hint">Tap any dollar figure to see how it was worked out.</p>
+      </section>
+
+      ${showGuide ? `
+      <section class="card guide">
+        <div class="row-head"><h2>Three steps to check your pay</h2><button type="button" class="icon-btn" data-guide-dismiss aria-label="Hide these steps">${ICON.close}</button></div>
+        ${steps.map((st, i) => `
+        <a class="step ${st.done ? 'done' : ''}" href="${st.href}">
+          <span class="step-n" aria-hidden="true">${st.done ? '✓' : i + 1}</span>
+          <span class="act-t"><b>${esc(st.t)}</b><small class="muted">${st.done ? 'Done' : esc(st.s)}</small></span>
+          ${ICON.right}
+        </a>`).join('')}
+      </section>` : ''}
+
+      <section class="card">
+        <h2>Pay</h2>
+        <div class="acts">
+          ${act('#/pay?go=trips', 'Add a trip', 'Paste a trip recap, or type the hours')}
+          ${act('#/pay?go=whatif', 'See what a draft is worth', 'Pick the hours and watch the check change')}
+          ${act('#/pay?go=stub', 'Check a pay stub', 'See if the check matches')}
+        </div>
       </section>
 
       <section class="card">
-        <div class="row-head"><h2>${periodName(code)} bid period</h2><span class="muted small">${c.weeks} weeks</span></div>
-        <dl class="kv">
+        <h2>Banks and retirement</h2>
+        <div class="acts">
+          ${act('#/deviation', 'Deviation bank', !rec ? 'Log deadheads and expenses' : expiring.length ? `${$(expiring.reduce((sum, b) => sum + b.valueCents, 0))} expires after this bid period` : 'Nothing expires this bid period', over ? `Over ${$(over)}` : $(rec?.remainingCents || 0), 'data-tab-to="deviation"', over || expiring.length ? 'alert-text' : 'muted')}
+          ${act('#/deviation', 'Hotel bank', sim.hotel.rows.length ? `${$(sim.hotel.accruedCents)} accrued, ${$(sim.hotel.usedCents)} used` : 'Log cancelled rooms', $(sim.hotel.remainingCents), 'data-tab-to="hotel"')}
+          ${act('#/401k', `401(k) ${k.year}`, kAlert ? esc(kAlert.text) : 'Pre-tax + Roth by Dec 31', $(k.proj.end.deferral, { whole: true }), '', kAlert ? 'alert-text' : 'muted')}
+          ${act('#/retire', 'Retirement choice', eligible === false ? 'For pilots hired before June 29, 2026' : `Window opens ${formatDate(opens, { year: true })}`, `${Math.max(0, dOpen)} days`)}
+        </div>
+      </section>
+
+      <details class="card fold">
+        <summary><span class="act-t"><b>Your rate and ${periodName(code)}</b><small class="muted">${esc(fleetName(ctx.fleet))} ${esc(seatName(ctx.seat))} · Year ${ctx.yg.yg} · ${$(ctx.rateCents)}/hr</small></span>${ICON.chevron}</summary>
+        <dl class="kv fold-body">
           <div><dt>Hourly rate</dt><dd>${x.money(ctx.rateCents, rateExplain(ctx), { cls: 'num' })}<small>${esc(fleetName(ctx.fleet))} ${esc(seatName(ctx.seat))} · Year ${ctx.yg.yg}</small></dd></div>
           <div><dt>Guarantee</dt><dd>${x.money(c.guarantee.cents, guaranteeExplain(c, ctx), { cls: 'num' })}<small>${H(c.guarantee.minutes)} CH ${c.gLabel}${c.guarantee.source === 'minimum' ? ' (minimum)' : c.guarantee.source === 'typical' ? ' (typical)' : ''}</small></dd></div>
           <div><dt>Bid period earns</dt><dd>${x.money(c.earnedCents, earnedExplain(c, ctx), { cls: 'num', mark: false })}<small>Guarantee + extras</small></dd></div>
           <div><dt>Annualized gross</dt><dd>${x.money(c.annualizedCents, annualExplain(c), { cls: 'num', whole: true })}<small>If every period looks like this</small></dd></div>
         </dl>
-      </section>
+      </details>
 
-      <section class="card">
-        <div class="row-head"><h2>Retirement election</h2>${eligible === false ? '<span class="pill">Hired after Jun 29, 2026</span>' : ''}</div>
-        <p class="countdown"><span class="num">${Math.max(0, dOpen)}</span> days until the window opens ${formatDate(opens, { year: true })}</p>
-        <ul class="dates">
-          <li><span>Packets</span><span>${formatDate(ret.packets.from)}–${formatDate(ret.packets.to, { year: true })}</span></li>
-          <li><span>Election window</span><span>${formatDate(ret.window.from)}–${formatDate(ret.window.to, { year: true })}</span></li>
-          <li><span>Confirmation by</span><span>${formatDate(ret.confirmationBy, { year: true })}</span></li>
-        </ul>
-        <p class="muted small">One-time choice for pilots hired before June 29, 2026: stay in the pension, cash balance plan, or enhanced 401(k).</p>
-        <a class="btn" href="#/retire">Compare the three side by side</a>
-      </section>
-
-      ${(() => {
-        const sim = bankSnapshot(app.state, code);
-        const rec = sim.periods.get(code);
-        const expiring = (rec?.balances || []).filter((b) => b.kind === 'new' && b.periodsLeft <= 1);
-        const expHotel = expiring.reduce((s, b) => s + b.toHotelCents, 0);
-        const over = rec?.outOfPocketCents || 0;
-        return `
-        <a class="card card-link" href="#/deviation" data-tab-to="deviation">
-          <div class="row-head"><h2>Deviation bank</h2><span class="muted small">${periodName(code)}</span></div>
-          <div class="link-amt num ${over ? 'alert-text' : ''}">${over ? `Over by ${$(over)}` : $(rec?.remainingCents || 0)}</div>
-          <p class="muted small">${!rec ? 'Log deadheads and expenses, or paste the company screen.' : expiring.length ? `${$(expiring.reduce((s, b) => s + b.valueCents, 0))} expires after this bid period; ${$(expHotel)} would move to the hotel bank.` : `${(rec.balances || []).length} balance${(rec.balances || []).length === 1 ? '' : 's'} carrying. Nothing expires this bid period.`}</p>
-        </a>
-        <a class="card card-link" href="#/deviation" data-tab-to="hotel">
-          <div class="row-head"><h2>Hotel bank</h2><span class="muted small">cap $15,000</span></div>
-          <div class="link-amt num">${$(sim.hotel.remainingCents)}</div>
-          <p class="muted small">${sim.hotel.rows.length ? `${$(sim.hotel.accruedCents)} accrued, ${$(sim.hotel.usedCents)} used.` : 'Log cancelled rooms: $50 domestic, $70 international.'}</p>
-        </a>`;
-      })()}
-      ${(() => {
-        const k = k401View(app.state);
-        const alert = k.flags.find((f) => f.tone === 'alert');
-        return `
-        <a class="card card-link" href="#/401k">
-          <div class="row-head"><h2>401(k) ${k.year}</h2><span class="muted small">limit ${$(k.limits.deferral, { whole: true })}</span></div>
-          <div class="link-amt num">${$(k.proj.end.deferral, { whole: true })} <small class="muted">pre-tax + Roth by Dec 31</small></div>
-          <div class="meter ${k.proj.overTotal ? 'over' : ''}"><span style="width:${Math.min(100, Math.round((k.proj.end.deferral / k.limits.deferral) * 100))}%"></span></div>
-          <p class="small ${alert ? 'alert-text' : 'muted'}">${esc((alert || k.flags[1] || k.flags[0]).text)}</p>
-        </a>`;
-      })()}
       ${(() => {
         const s = installState();
         if (app.state.installHint === 'dismissed' || (s !== 'prompt' && s !== 'ios')) return '';

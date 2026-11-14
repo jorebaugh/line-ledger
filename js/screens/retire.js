@@ -3,7 +3,7 @@
 
 import { RULES } from '../../rules.js';
 import { todayISO, periodFromISO, ruleAt, formatDate, daysBetween, formatMoney as $, parseMoney, parsePct } from '../core.js';
-import { esc, confirmPill, toast } from '../ui.js';
+import { esc, confirmPill, toast, ICON } from '../ui.js';
 import { retireCompare, PATHS, serviceFromDoh } from '../retire.js';
 import { k401View } from '../k401.js';
 
@@ -198,6 +198,8 @@ const slider = (key, label, min, max, step, value, hint, unit = '%') => `
     ${hint ? `<p class="hint">${esc(hint)}</p>` : ''}
   </div>`;
 
+const openFolds = new Set(); // folded sections the user opened
+
 export default {
   title: 'Retirement',
   render(app) {
@@ -243,15 +245,17 @@ export default {
 
       <div id="ret-out">${resultsHTML(app, m)}</div>
 
-      <section class="card">
-        <h2>Assumptions</h2>
+      <details class="card fold" data-fold="assume" ${openFolds.has('assume') ? 'open' : ''}>
+        <summary><span class="act-t"><b>Change the assumptions</b><small class="muted">Pay growth, returns, life expectancy</small></span>${ICON.chevron}</summary>
+        <div class="fold-body">
         ${SLIDERS.map(([k, label, min, max, step, , hint]) => slider(k, label, min, max, step, val(k), hint, k === 'payTo' ? '' : '%')).join('')}
         <button type="button" class="btn ghost small" data-act="reset-ret">Back to the starting assumptions</button>
-      </section>
+        </div>
+      </details>
 
-      <section class="card">
-        <h2>How it's worked out</h2>
-        <ul class="bullets small">
+      <details class="card fold" data-fold="how" ${openFolds.has('how') ? 'open' : ''}>
+        <summary><span class="act-t"><b>How it's worked out</b><small class="muted">The contract sections behind each number</small></span>${ICON.chevron}</summary>
+        <ul class="bullets small fold-body">
           <li><b>Stay in the pension:</b> final average earnings (best five calendar years, up to $340,000) × 2% × credited years, max 25 (28.B.2-3). Company 401(k) 9%, subject to IRS limits, with no cash over them (28.D.4.b.i).</li>
           <li><b>Electing either new option:</b> credited years freeze; the June 2027 to May 2028 plan year counts 7/12. Final average earnings keep counting later pay, up to $290,000 (28.B.13, LOA A.1).</li>
           <li><b>Cash balance plan:</b> from Jan 1, 2028, 9% of pay in 2028 and 10% from 2029, plus market-based interest. Normal retirement age 62 (28.C.7-8). Credits counted on pay up to the compensation limit ${confirmPill}. Company 401(k) stays 9%.</li>
@@ -261,10 +265,14 @@ export default {
           <li>IRS limits are the published ${m.inp.year0 >= 2027 ? m.inp.year0 : 2027} figures (IRS Notice 2026-66), then grown at your assumption.</li>
           <li>Not modelled: early retirement reductions, the pre-2006 multipliers (28.B.4), the flat-dollar formula, Flying Tiger benefits, taxes and inflation.</li>
         </ul>
-      </section>`;
+      </details>`;
   },
 
   mount(el, app) {
+    el.addEventListener('toggle', (e) => {
+      const k = e.target.dataset?.fold;
+      if (k) { if (e.target.open) openFolds.add(k); else openFolds.delete(k); }
+    }, true);
     const st = app.state;
     const refresh = () => {
       const out = el.querySelector('#ret-out');
