@@ -1,85 +1,73 @@
-// The intake questions. Used for first run (Intake) and later edits (Settings).
+// Your answers, edited in Settings: three folded sections (You, Your line, Instructor or check airman)
+// inside one form. Settings saves on every change. First-time setup has its own screen (intake.js).
 
 import { RULES } from '../../rules.js';
 import { todayISO, periodFromISO, periodName, formatMoney, parsePct, parseHours, formatHours, parseMoney } from '../core.js';
 import { payContext, seatName, fleetName, ROLES } from '../paymath.js';
-import { esc, seg } from '../ui.js';
+import { esc, seg, ICON } from '../ui.js';
 
-const pctField = (name, label, value, placeholder = '0') => `
-  <label class="f">
-    <span>${esc(label)}</span>
-    <span class="suffix-wrap"><input name="${name}" inputmode="decimal" autocomplete="off" placeholder="${esc(placeholder)}" value="${esc(value ?? '')}"><i>%</i></span>
-  </label>`;
+// One line under each section's title, so the answer shows without opening it.
+export function profileSummaries(p = {}) {
+  const ctx = payContext(RULES, { ...p, seat: p.seat || 'FO', fleet: p.fleet || 'WB' }, periodFromISO(todayISO()));
+  return {
+    you: `${seatName(ctx.seat)} · ${fleetName(ctx.fleet)} · Year group ${ctx.yg.yg}`,
+    line: `${p.line === 'reserve' ? 'Reserve' : 'Regular line'} · ${p.lineValue ? `${p.lineValue} CH` : 'minimum guarantee'} · mostly ${p.flying === 'international' ? 'international' : 'domestic'}`,
+    role: p.role ? `${ROLES[p.role]} · Year ${Math.min(4, Number(p.roleYear) || 1)}${Number(p.roleYear) >= 4 ? '+' : ''}` : 'No',
+  };
+}
 
-export function profileFormHTML(p = {}, { mode = 'intake' } = {}) {
+export function profileFormHTML(p = {}, openFolds = new Set()) {
   const ygMode = p.ygMode || 'doh';
   const ygOptions = Array.from({ length: 15 }, (_, i) => `<option value="${i + 1}" ${Number(p.yearGroup) === i + 1 ? 'selected' : ''}>Year group ${i + 1}</option>`).join('');
-  const settings = mode === 'settings';
-  const moreOpen = '';
+  const sum = profileSummaries(p);
+  const fold = (key, title, body) => `
+    <details class="card fold" data-fold="${key}" data-sec="${key}" ${openFolds.has(key) ? 'open' : ''}>
+      <summary><span class="act-t"><b>${title}</b><small class="muted" data-sum="${key}">${esc(sum[key])}</small></span>${ICON.chevron}</summary>
+      <div class="fold-body stack">${body}</div>
+    </details>`;
   return `
-  <form id="profile" class="stack" novalidate autocomplete="off">
-    <fieldset class="field"><legend>Seat</legend>
-      ${seg('seat', [['CA', 'Captain'], ['FO', 'First Officer']], p.seat)}</fieldset>
-
-    <fieldset class="field"><legend>Fleet</legend>
-      ${seg('fleet', [['WB', 'Wide body'], ['NB', 'Narrow body']], p.fleet)}</fieldset>
-
-    <fieldset class="field"><legend>Longevity</legend>
-      ${seg('ygMode', [['doh', 'Date of hire'], ['pick', 'Pick year group']], ygMode, { cls: 'seg-small' })}
-      <div class="mt" data-show="doh" ${ygMode === 'doh' ? '' : 'hidden'}>
-        <input type="date" name="doh" value="${esc(p.doh || '')}" max="${todayISO()}" aria-label="Date of hire">
-      </div>
-      <div class="mt" data-show="pick" ${ygMode === 'pick' ? '' : 'hidden'}>
-        <select name="yearGroup" aria-label="Year group">${ygOptions}</select>
-      </div>
-      <p class="hint" data-out="yg"></p>
-    </fieldset>
-
-    <fieldset class="field"><legend>Bid period length</legend>
-      ${seg('weeks', [['4', '4 weeks'], ['5', '5 weeks'], ['6', '6 weeks']], String(p.weeks || 4))}</fieldset>
-
-    <fieldset class="field"><legend>Line</legend>
-      ${seg('line', [['regular', 'Regular line'], ['reserve', 'Reserve']], p.line || 'regular')}
-      <label class="f mt"><span>Line value, credit hours <span class="muted">(optional)</span></span>
-        <input name="lineValue" value="${esc(p.lineValue || '')}" placeholder="Leave blank for the minimum" autocomplete="off" spellcheck="false"></label>
-      <p class="hint">What your line is usually worth, like 72:30. Blank starts from the minimum guarantee.</p></fieldset>
-
-    <fieldset class="field"><legend>Typical flying</legend>
-      ${seg('flying', [['domestic', 'Mostly domestic'], ['international', 'Mostly international']], p.flying)}
-      <p class="hint">Pre-fills typical per diem and override. You can change every number later.</p></fieldset>
-
-    <fieldset class="field"><legend>Instructor or check airman</legend>
-      <div class="grid2">
-        <label class="f"><span>Role</span>
-          <select name="role"><option value="">No</option>${Object.entries(ROLES).map(([v, l]) => `<option value="${v}" ${p.role === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-        <label class="f" data-role-year ${p.role ? '' : 'hidden'}><span>Year in the program</span>
-          <select name="roleYear">${[[1, 'Year 1'], [2, 'Year 2'], [3, 'Year 3'], [4, 'Year 4 and above']].map(([v, l]) => `<option value="${v}" ${Number(p.roleYear || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      </div>
-      <p class="hint" data-out="role"></p></fieldset>
-
-    <details class="more" ${moreOpen}>
-      <summary>Make it more accurate <span class="muted">(optional)</span></summary>
-      ${settings ? '' : `<div class="grid2">
-        ${pctField('pretax', 'Pre-tax 401(k)', p.pretax)}
-        ${pctField('roth', 'Roth 401(k)', p.roth)}
-        ${pctField('aftertax', 'After-tax 401(k)', p.aftertax)}
-        ${pctField('withholding', 'Total tax withholding', p.withholding, '30')}
-      </div>`}
+  <form id="profile" novalidate autocomplete="off">
+    ${fold('you', 'You', `
+      <fieldset class="field"><legend>Seat</legend>
+        ${seg('seat', [['CA', 'Captain'], ['FO', 'First Officer']], p.seat)}</fieldset>
+      <fieldset class="field"><legend>Fleet</legend>
+        ${seg('fleet', [['WB', 'Wide body'], ['NB', 'Narrow body']], p.fleet)}</fieldset>
+      <fieldset class="field"><legend>Longevity</legend>
+        ${seg('ygMode', [['doh', 'Date of hire'], ['pick', 'Pick year group']], ygMode, { cls: 'seg-small' })}
+        <div class="mt" data-show="doh" ${ygMode === 'doh' ? '' : 'hidden'}>
+          <input type="date" name="doh" value="${esc(p.doh || '')}" max="${todayISO()}" aria-label="Date of hire">
+        </div>
+        <div class="mt" data-show="pick" ${ygMode === 'pick' ? '' : 'hidden'}>
+          <select name="yearGroup" aria-label="Year group">${ygOptions}</select>
+        </div>
+        <p class="hint" data-out="yg"></p>
+      </fieldset>
       <label class="f"><span>Age</span>
         <select name="ageBand">
           ${[['u50', 'Under 50'], ['50to59', '50 to 59'], ['60to63', '60 to 63'], ['64plus', '64+']].map(([v, l]) => `<option value="${v}" ${p.ageBand === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></label>
-      ${settings ? '' : `<label class="f"><span>Other deductions per check</span>
-        <input name="otherDed" inputmode="decimal" value="${esc(p.otherDed || '')}" placeholder="$0.00" autocomplete="off"></label>
-      <p class="hint">Insurance, medical, dental and the like: everything except 401(k), dues and taxes. Later you can add a pay stub (PDF or text) in Settings to fill these in.</p>`}
+      <p class="hint">Age sets your 401(k) catch-up limit.</p>
       <fieldset class="field"><legend>Commuter</legend>
-        ${seg('commuter', [['yes', 'Yes'], ['no', 'No']], p.commuter || 'no', { cls: 'seg-small' })}</fieldset>
-      ${settings ? '' : '<p class="hint">Withholding is your total from a recent stub (federal + state + FICA) as a percent of gross. Leave blank and the estimate assumes 30%.</p>'}
-    </details>
+        ${seg('commuter', [['yes', 'Yes'], ['no', 'No']], p.commuter || 'no', { cls: 'seg-small' })}</fieldset>`)}
 
-    <p class="form-error" data-out="err" role="alert" hidden></p>
-    <button class="btn primary big" type="submit">${mode === 'intake' ? 'See my estimate' : 'Save changes'}</button>
-    ${mode === 'intake' ? '<button class="btn ghost" type="button" data-act="sample">Just looking? Load a sample pilot</button>' : ''}
+    ${fold('line', 'Your line', `
+      <fieldset class="field"><legend>Line or reserve</legend>
+        ${seg('line', [['regular', 'Regular line'], ['reserve', 'Reserve']], p.line || 'regular')}</fieldset>
+      <label class="f"><span>Usual line value, in credit hours <span class="muted">(optional)</span></span>
+        <input name="lineValue" value="${esc(p.lineValue || '')}" placeholder="Leave blank for the minimum" autocomplete="off" spellcheck="false"></label>
+      <p class="hint">What your line is usually worth, like 72:30. Blank starts from the minimum guarantee.</p>
+      <fieldset class="field"><legend>Usual bid period length</legend>
+        ${seg('weeks', [['4', '4 weeks'], ['5', '5 weeks'], ['6', '6 weeks']], String(p.weeks || 4))}</fieldset>
+      <fieldset class="field"><legend>Typical flying</legend>
+        ${seg('flying', [['domestic', 'Mostly domestic'], ['international', 'Mostly international']], p.flying)}
+        <p class="hint">A starting guess for per diem and override until you add trips.</p></fieldset>`)}
+
+    ${fold('role', 'Instructor or check airman', `
+      <label class="f"><span>Role</span>
+        <select name="role"><option value="">No</option>${Object.entries(ROLES).map(([v, l]) => `<option value="${v}" ${p.role === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="f" data-role-year ${p.role ? '' : 'hidden'}><span>Year in the program</span>
+        <select name="roleYear">${[[1, 'Year 1'], [2, 'Year 2'], [3, 'Year 3'], [4, 'Year 4 and above']].map(([v, l]) => `<option value="${v}" ${Number(p.roleYear || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <p class="hint" data-out="role"></p>`)}
   </form>`;
 }
 
@@ -161,11 +149,4 @@ export function bindProfileForm(form) {
   form.addEventListener('input', update);
   form.addEventListener('change', update);
   update();
-}
-
-export function showErrors(form, errors) {
-  const el = form.querySelector('[data-out="err"]');
-  el.hidden = errors.length === 0;
-  el.textContent = errors.join(' ');
-  if (errors.length) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }

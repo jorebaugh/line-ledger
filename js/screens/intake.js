@@ -1,21 +1,27 @@
-// First-time setup: one question per screen, big buttons. Five answers, then the estimate.
-// Everything else (line value, 401(k), instructor role, bid period length) has a default and lives in Settings.
+// First-time setup: one question per screen, big buttons. Six answers (seven for an instructor or check
+// airman), then the estimate. Everything else (line value, 401(k), bid period length) has a default and
+// lives in Settings.
 
 import { blank, ensurePeriod } from '../store.js';
 import { sampleState } from '../sample.js';
 import { todayISO, periodFromISO, shiftPeriod } from '../core.js';
 import { esc, ICON } from '../ui.js';
+import { ROLES } from '../paymath.js';
 
-const QUESTIONS = [
+const ALL_QUESTIONS = [
   { key: 'seat', q: 'Which seat are you in?', opts: [['CA', 'Captain'], ['FO', 'First Officer']] },
   { key: 'fleet', q: 'What do you fly?', opts: [['WB', 'Wide body'], ['NB', 'Narrow body']] },
   { key: 'line', q: 'Do you hold a line, or are you on reserve?', opts: [['regular', 'I hold a line'], ['reserve', "I'm on reserve"]] },
   { key: 'flying', q: 'What do you mostly fly?', opts: [['domestic', 'Domestic'], ['international', 'International']], note: 'Used for a starting guess at per diem and override. You can change it any time.' },
+  { key: 'role', q: 'Are you an instructor or check airman?', opts: [['', 'No'], ...Object.entries(ROLES)] },
+  { key: 'roleYear', q: 'Which year in the program?', opts: [['1', 'Year 1'], ['2', 'Year 2'], ['3', 'Year 3'], ['4', 'Year 4 or more']], when: (a) => !!a.role, note: 'Sets your bid period override.' },
   { key: 'hire', q: 'When were you hired?' },
 ];
 
 let step = 0;
 let ans = {};
+// The year-in-program question only appears for an instructor or check airman.
+const questions = () => ALL_QUESTIONS.filter((q) => !q.when || q.when(ans));
 
 const yearGroups = (sel) => Array.from({ length: 15 }, (_, i) => `<option value="${i + 1}" ${Number(sel) === i + 1 ? 'selected' : ''}>Year group ${i + 1}</option>`).join('');
 
@@ -36,6 +42,8 @@ function hireHTML() {
 export default {
   title: 'Set up',
   render() {
+    const QUESTIONS = questions();
+    step = Math.min(step, QUESTIONS.length - 1);
     const cur = QUESTIONS[step];
     return `
       <div class="wiz">
@@ -45,10 +53,10 @@ export default {
         </div>
         <div class="wiz-bar" aria-hidden="true"><span style="width:${Math.round(((step + 1) / QUESTIONS.length) * 100)}%"></span></div>
         <h1>${esc(cur.q)}</h1>
-        ${cur.opts ? `<div class="wiz-opts">${cur.opts.map(([v, label]) => `
+        ${cur.opts ? `<div class="wiz-opts ${cur.opts.length > 3 ? 'tight' : ''}">${cur.opts.map(([v, label]) => `
           <button type="button" class="wiz-opt ${ans[cur.key] === v ? 'on' : ''}" data-pick="${cur.key}" data-val="${v}">${esc(label)}</button>`).join('')}</div>` : hireHTML()}
         ${cur.note ? `<p class="wiz-note">${esc(cur.note)}</p>` : ''}
-        ${step === 0 ? `<p class="wiz-note">Five quick questions, then your next check. Everything stays on this phone.</p>
+        ${step === 0 ? `<p class="wiz-note">A few quick questions, then your next check. Everything stays on this phone.</p>
           <button type="button" class="btn ghost wide" data-act="sample">Just looking? Load a sample pilot</button>` : ''}
       </div>`;
   },
@@ -64,7 +72,7 @@ export default {
       const pick = e.target.closest('[data-pick]');
       if (pick) {
         ans[pick.dataset.pick] = pick.dataset.val;
-        step = Math.min(QUESTIONS.length - 1, step + 1);
+        step = Math.min(questions().length - 1, step + 1);
         app.render();
         return;
       }
@@ -91,7 +99,7 @@ export default {
         s.profile = {
           seat: ans.seat, fleet: ans.fleet, ygMode: pickMode ? 'pick' : 'doh', doh, yearGroup,
           weeks: 4, line: ans.line || 'regular', lineValue: '', flying: ans.flying || 'domestic',
-          pretax: '', roth: '', aftertax: '', withholding: '', ageBand: 'u50', commuter: 'no', otherDed: '', role: '', roleYear: 1,
+          pretax: '', roth: '', aftertax: '', withholding: '', ageBand: 'u50', commuter: 'no', otherDed: '', role: ans.role || '', roleYear: ans.role ? Number(ans.roleYear) || 1 : 1,
         };
         const code = periodFromISO(todayISO());
         s.viewCode = code;

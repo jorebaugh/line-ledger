@@ -4,12 +4,30 @@ import { APP_VERSION } from '../../config.js';
 
 let installWatch = false;
 import { sampleState } from '../sample.js';
-import { profileFormHTML, readProfile, bindProfileForm, showErrors } from './profile-form.js';
-import { openSheet, toast, esc } from '../ui.js';
+import { profileFormHTML, profileSummaries, readProfile, bindProfileForm } from './profile-form.js';
+import { openSheet, toast, esc, ICON } from '../ui.js';
 import { formatMoney as $, formatDate, parseMoney, parsePct } from '../core.js';
 import { stubSummaryHTML, openStubSheet } from './stub-sheet.js';
 
 const DED_PCT = ['withholding', 'pretax', 'roth', 'aftertax'];
+const openFolds = new Set(); // sections the user opened; everything starts closed
+let pendingGo = null; // section to open and jump to, from a link like #/settings?go=role
+
+const fold = (key, title, sub, body) => `
+  <details class="card fold" data-fold="${key}" data-sec="${key}" ${openFolds.has(key) ? 'open' : ''}>
+    <summary><span class="act-t"><b>${title}</b><small class="muted" data-sum="${key}">${sub}</small></span>${ICON.chevron}</summary>
+    <div class="fold-body">${body}</div>
+  </details>`;
+
+// The one-line summary under "Taxes and deductions".
+function dedSummary(p = {}) {
+  const bits = [p.withholding ? `${p.withholding}% tax` : '30% tax (estimate)'];
+  if (p.pretax) bits.push(`${p.pretax}% pre-tax`);
+  if (p.roth) bits.push(`${p.roth}% Roth`);
+  if (p.aftertax) bits.push(`${p.aftertax}% after-tax`);
+  if (p.otherDed) bits.push(`${$(Math.round(Number(p.otherDed) * 100))} other`);
+  return bits.join(' · ');
+}
 
 // Deductions used for take-home estimates: typed, or filled from a pasted pay stub.
 function deductionsHTML(state) {
@@ -19,19 +37,16 @@ function deductionsHTML(state) {
   const pct = (k, label, ph = '0') => `
     <label class="f"><span>${label}</span><span class="suffix-wrap"><input data-ded="${k}" inputmode="decimal" value="${esc(p[k] || '')}" placeholder="${ph}" autocomplete="off"><i>%</i></span></label>`;
   return `
-    <section class="card" id="deductions">
-      <div class="row-head"><h2>Pay stub and deductions</h2><button type="button" class="btn small primary" data-act="paste-stub">Add pay stub</button></div>
-      <p class="small muted">Used for take-home estimates on Home and Pay, and for the 401(k) tracker. Add a stub (PDF or pasted text) to fill these in, or type them. Changes save as you go.</p>
-      <div class="grid2">
+      <button type="button" class="btn primary big wide" data-act="paste-stub">Add a pay stub</button>
+      <p class="hint center">Fastest: the app reads these numbers off your stub. Or type them below.</p>
+      <div class="stack mt">
         ${pct('withholding', 'Tax withholding', '30')}
         <label class="f"><span>Other deductions per check</span><input data-ded="otherDed" inputmode="decimal" value="${esc(p.otherDed || '')}" placeholder="$0.00" autocomplete="off"></label>
-      </div>
-      <div class="grid3">
         ${pct('pretax', 'Pre-tax 401(k)')}
         ${pct('roth', 'Roth 401(k)')}
-        ${pct('aftertax', 'After-tax')}
+        ${pct('aftertax', 'After-tax 401(k)')}
       </div>
-      <p class="hint">Withholding is federal + state + FICA as a percent of gross pay less per diem. Blank assumes 30%. Other deductions are everything except 401(k), dues and taxes: medical, dental, insurance and the like. Dues come from the contract rate.</p>
+      <p class="hint">Used for take-home estimates and the 401(k) tracker. Withholding is federal + state + FICA as a percent of gross pay less per diem; blank assumes 30%. Other deductions are everything except 401(k), dues and taxes: medical, dental, insurance and the like.</p>
       ${latest ? `
         <details class="more">
           <summary>Latest stub: ${formatDate(latest.adviceDate, { year: true })}</summary>
@@ -41,55 +56,71 @@ function deductionsHTML(state) {
         <ul class="ledger">
           ${stubs.map((st) => `<li><span>${formatDate(st.adviceDate, { year: true })} <small class="muted">${$(st.gross?.cur || 0)} gross · ${$(st.other.cur)} other</small></span>
             <span><button type="button" class="btn ghost small" data-use-stub="${esc(st.adviceDate)}">Use</button> <button type="button" class="btn ghost small" data-del-stub="${esc(st.adviceDate)}" aria-label="Remove the ${esc(formatDate(st.adviceDate))} stub">Remove</button></span></li>`).join('')}
-        </ul>` : '<p class="small muted mt">No stubs saved yet.</p>'}
-    </section>`;
+        </ul>` : ''}`;
 }
 
 export default {
   title: 'Settings',
   render(app) {
+    const go = new URLSearchParams(location.hash.split('?')[1] || '').get('go');
+    if (go) {
+      pendingGo = go;
+      openFolds.add(go);
+      history.replaceState(null, '', '#/settings');
+    }
+    const inst = installState();
     return `
       <h1>Settings</h1>
-      <section class="card">
-        <h2>Your answers</h2>
-        ${profileFormHTML(app.state.profile || {}, { mode: 'settings' })}
-      </section>
-      ${deductionsHTML(app.state)}
-      <section class="card" id="install">
-        <h2>On your phone</h2>
-        <p class="small">${INSTALL_HELP[installState()]}</p>
-        ${installState() === 'prompt' ? '<button type="button" class="btn primary" data-act="install">Install Line Ledger</button>' : ''}
-      </section>
-      <section class="card">
-        <h2>Your data</h2>
+      <p class="lede">Tap a row to change it. Changes save as you make them.</p>
+      ${profileFormHTML(app.state.profile || {}, openFolds)}
+      ${fold('deductions', 'Taxes and deductions', esc(dedSummary(app.state.profile || {})), deductionsHTML(app.state))}
+      ${fold('install', 'Put it on your phone', inst === 'installed' ? 'Installed' : 'Add it to your home screen', `
+        <p>${INSTALL_HELP[inst]}</p>
+        ${inst === 'prompt' ? '<button type="button" class="btn primary wide" data-act="install">Install Line Ledger</button>' : ''}`)}
+      ${fold('data', 'Your data', 'Back up, move to a new phone, or start over', `
         <p class="muted small">Everything you enter is stored only in this browser on this device. Nothing is sent anywhere. Export a copy to move it to a new phone or keep a backup.</p>
         <div class="stack">
           <button type="button" class="btn" data-act="export">Export my data (JSON)</button>
           <label class="btn file-btn">Import a saved copy<input type="file" accept="application/json,.json" data-import></label>
           <button type="button" class="btn" data-act="sample">Load the sample pilot</button>
           <button type="button" class="btn danger" data-act="reset">Reset all data</button>
-        </div>
-      </section>
-      <section class="card">
-        <h2>About</h2>
-        <p class="small">Line Ledger is a preview. Contract figures come from one rules file, each with its section reference. Anything marked <span class="confirm">confirm</span> hasn't been checked against its source yet.</p>
-        <p class="small muted">Version ${esc(APP_VERSION)}</p>
-      </section>`;
+        </div>`)}
+      ${fold('about', 'About', `Version ${esc(APP_VERSION)}`, `
+        <p class="small">Line Ledger is a preview. Contract figures come from one rules file, each with its section reference. Anything marked <span class="confirm">confirm</span> hasn't been checked against its source yet.</p>`)}`;
   },
   mount(el, app) {
     const form = el.querySelector('#profile');
     bindProfileForm(form);
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
+    const setSum = (key, text) => { const n = el.querySelector(`[data-sum="${key}"]`); if (n) n.textContent = text; };
+    // Save on every change. The one-line summaries update in place, so nothing jumps while you tap.
+    form.addEventListener('submit', (e) => e.preventDefault());
+    form.addEventListener('change', () => {
       const { profile, errors } = readProfile(form, app.state.profile || {});
-      showErrors(form, errors);
-      if (errors.length) return;
+      if (errors.length) { toast(errors[0]); return; }
       app.state.profile = { ...app.state.profile, ...profile };
       refreshPresets(app.state);
       app.save();
+      const sum = profileSummaries(app.state.profile);
+      Object.keys(sum).forEach((k) => setSum(k, sum[k]));
       toast('Saved');
-      app.go('home');
     });
+    // <details> toggles don't bubble: listen on the way down, and remember what's open.
+    el.addEventListener('toggle', (e) => {
+      const k = e.target.dataset?.fold;
+      if (k) { if (e.target.open) openFolds.add(k); else openFolds.delete(k); }
+    }, true);
+    if (pendingGo) {
+      const want = pendingGo;
+      pendingGo = null;
+      setTimeout(() => {
+        const sec = el.querySelector(`[data-sec="${want}"]`);
+        if (!sec) return;
+        sec.scrollIntoView({ block: 'start' });
+        window.scrollBy(0, -64);
+        sec.classList.add('flash');
+        setTimeout(() => sec.classList.remove('flash'), 1600);
+      }, 0);
+    }
 
     const confirmSheet = (title, body, label, onYes) => openSheet(title, `
       <p>${body}</p>
@@ -135,6 +166,7 @@ export default {
         t.value = p[k];
       }
       app.save();
+      setSum('deductions', dedSummary(p));
       toast('Saved');
     });
 

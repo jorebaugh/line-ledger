@@ -371,7 +371,7 @@ export default {
         <p class="hint">From your bid package, like 72:30. Leave it blank to use the minimum.</p>
         ${o('guarantee')}
         ${app.state.profile.role || cur.payOnly ? `<label class="check"><input type="checkbox" data-p="payOnly" ${cur.payOnly ? 'checked' : ''}><span>Pay-only line this bid period <small>instructional bid period</small></span></label>
-        ${cur.payOnly ? `<p class="hint">Paid the ${g} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : '<p class="hint">Instructor or check airman? <a href="#/settings">Set it in Settings</a>.</p>'}
+        ${cur.payOnly ? `<p class="hint">Paid the ${g} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : '<p class="hint">Instructor or check airman? <a href="#/settings?go=role">Set it in Settings</a>.</p>'}
         <details class="more">
           <summary>Know your ${periodName(v.nextCode)} line value?</summary>
           <label class="f"><span>${periodName(v.nextCode)} line value <span class="muted">(shows the whole ${formatDate(v.checks.next.date)} check)</span></span>

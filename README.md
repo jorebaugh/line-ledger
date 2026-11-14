@@ -11,8 +11,9 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
 - Pay math (`js/paymath.js`), bank math (`js/banks.js`), the trip recap reader (`js/recap.js`), the pay stub
   reader (`js/stub.js`), the 401(k) tracker (`js/k401.js`) and the retirement comparison (`js/retire.js`): pure
   functions, integer cents and minutes, with unit tests.
-- First-time setup is five questions, one per screen with big buttons (`js/screens/intake.js`); line value,
-  instructor/check airman role and deductions have defaults and live in Settings. Home shows the next check,
+- First-time setup is six questions (seven for an instructor or check airman), one per screen with big buttons
+  (`js/screens/intake.js`). Settings is a list of folded rows that save on change. Line value,
+  bid period length and deductions have defaults and live in Settings. Home shows the next check,
   three numbered steps and a short action list. Pay shows the checks, your line, your trips and other pay; the
   what-if slider, last period, breakdown, stub check and history are folded sections. A trip shows four fields,
   with the rest under "More". Home,
