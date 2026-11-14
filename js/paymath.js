@@ -193,6 +193,11 @@ export const ASSIGNMENTS = {
   reserve: { label: 'Reserve', short: 'Reserve', codes: 'RSV' },
 };
 
+// On a pay-only line there are no line trips: a 100% trip is make-up flying, paid on top of the BLG.
+const PAY_ONLY_LINE = { label: 'M/U (100%)', short: 'M/U', codes: 'M/U, MUS/MUD/MUV' };
+export const assignInfo = (assign, payOnly = false) =>
+  payOnly && (assign === 'line' || assign === 'reserve' || !ASSIGNMENTS[assign]) ? PAY_ONLY_LINE : ASSIGNMENTS[assign] || ASSIGNMENTS.line;
+
 // Trip credit from duty-period block times.
 //   dp: { credit: scheduled DP credit (optional, defaults to sched block), sched: scheduled block,
 //         actual: actual block, dh: actual deadhead/ground block inside `actual` (optional, recap),
@@ -290,7 +295,10 @@ export function tripBko(trip, ctx) {
 
 export function calcTrip(trip, ctx) {
   const R = ctx.rateCents;
-  const a = ASSIGNMENTS[trip.assign] ? trip.assign : 'line';
+  const payOnly = !!ctx.payOnly;
+  // Pay-only line: no reserve, and a 100% trip is make-up (M/U) flown on top of the BLG.
+  const a = ASSIGNMENTS[trip.assign] && !(payOnly && trip.assign === 'reserve') ? trip.assign : 'line';
+  const makeUp = payOnly && a === 'line';
   const schedInfo = tripSched(trip, ctx);
   const sched = schedInfo.min;
   const bko = tripBko(trip, ctx);
@@ -303,8 +311,8 @@ export function calcTrip(trip, ctx) {
   const intl = !!trip.intl;
   const items = [];
   const notes = [];
-  const tripPctRule = a === 'draft' ? ctx.rule.draft : a === 'cmu' ? ctx.rule.cmu : a === 'pmu' ? ctx.rule.pmu : null;
-  const tripPct = tripPctRule ? tripPctRule.value : 100;
+  const tripPctRule = a === 'draft' ? ctx.rule.draft : a === 'cmu' ? ctx.rule.cmu : a === 'pmu' ? ctx.rule.pmu : makeUp ? ctx.rule.payOnly : null;
+  const tripPct = makeUp ? ctx.rule.payOnly.value.makeUpPct : tripPctRule ? tripPctRule.value : 100;
   const toward = a === 'reserve' ? 'RLG' : 'BLG';
 
   if (sched <= 0) notes.push('Enter the trip guarantee (scheduled credit hours)');
@@ -312,7 +320,7 @@ export function calcTrip(trip, ctx) {
 
   // Trip guarantee
   if (sched > 0) {
-    if (a === 'line' || a === 'reserve') {
+    if ((a === 'line' && !makeUp) || a === 'reserve') {
       items.push(item('toward', 'Trip guarantee', `${H(sched)} CH counts toward ${toward}`, 0, [a === 'reserve' ? ctx.rule.reserve : ctx.rule.minG], { minutes: sched }));
     } else {
       items.push(item('onTop', 'Trip guarantee', `${H(sched)} CH × ${$(R)} × ${tripPct}%`, payCents(sched, R, tripPct), [ctx.rule.rates, tripPctRule], { paidMin: sched }));
@@ -440,13 +448,16 @@ export function calcPeriod(period, ctx, { whatIfMin = 0 } = {}) {
   const R = ctx.rateCents;
 
   // Pay-only line (instructional bid period): BLG of the pay-only line, the bid period override, and
-  // day-off instruction or other pay. Trips and their per diem are left out (11.N.25.b.i, 11.M.13.b).
+  // anything picked up on top: M/U, VLT/DRF/AVA, CMU and PMU trips with their per diem, day-off
+  // instruction, other pay (11.N.25.b.i, 11.M.13.b). The line's typical-estimate rows are set aside,
+  // since a pay-only line has no line flying of its own.
   const payOnly = !!period.payOnly;
-  const trips = payOnly ? [] : (period.trips || []).map((t) => calcTrip(t, ctx));
+  const trips = (period.trips || []).map((t) => calcTrip(t, payOnly ? { ...ctx, payOnly: true } : ctx));
   const hasTrips = trips.length > 0;
   const allRows = period.rows || [];
-  const keep = ctx.rule.payOnly.value.keepRows;
-  const replaced = (r) => (payOnly && !keep.includes(r.type)) || (hasTrips && (r.type === 'perdiem' || r.type === 'override'));
+  const setAside = ctx.rule.payOnly.value.setAsideRows;
+  const replaced = (r) => (payOnly && (setAside.includes(r.type) || r.preset || r.auto === 'guarantee'))
+    || (hasTrips && (r.type === 'perdiem' || r.type === 'override'));
   // An override row set to follow the guarantee uses the line value until the user types hours.
   const resolve = (r) => (r.auto === 'guarantee' && !(parseHours(r.hours) > 0) ? { ...r, hours: gMin / 60 } : r);
   const rows = allRows.filter((r) => !replaced(r)).map((r) => calcRow(resolve(r), ctx));
@@ -476,7 +487,7 @@ export function calcPeriod(period, ctx, { whatIfMin = 0 } = {}) {
       text: `${H(gMin)} CH × ${$(R)}`,
       sources: [ctx.rule.rates, ctx.rule.minG, payOnly ? ctx.rule.payOnly : null].filter(Boolean),
     },
-    trips, rows, whatIf, role: roleE, hasTrips, hiddenRowIds, payOnly, hiddenTrips: payOnly ? (period.trips || []).length : 0,
+    trips, rows, whatIf, role: roleE, hasTrips, hiddenRowIds, payOnly,
     towardMin, excess,
     onTopCents, perDiemCents, extrasCents, earnedCents, paidExtraMin,
     whatIfCents: whatIf ? whatIf.totalCents : 0,

@@ -234,10 +234,10 @@ export const RULES = {
   payOnlyLine: [
     {
       effectiveFrom: 'JUL26',
-      value: { keepRows: ['adjust', 'other', 'dayoff'] },
-      source: 'Sec. 11.N.25.b.i (Instructor Pilot), 11.M.13.b (Check Airman)',
+      value: { setAsideRows: ['reserve'], makeUpPct: 100 },
+      source: 'Sec. 11.N.25.b.i (Instructor Pilot), 11.M.13.b (Check Airman), 4.P.1 (make-up)',
       verified: true,
-      note: 'Paid the BLG/RLG of your awarded pay-only line as published in the bid package, plus additional pay under Sections 3 and 4. Pay-only carryover CH go to your general make-up bank (11.N.12)',
+      note: 'Paid the BLG/RLG of your awarded pay-only line as published in the bid package, plus additional pay under Sections 3 and 4. Trips picked up on top of the pay-only line (M/U at 100%, PMU/SMU 125%, VLT/DRF/AVA and CMU 150%) pay on top of that BLG, with their per diem. Instructors can take AVA on a pay-only line (pilot-confirmed; the general pay-only VLT bar in 25.N.1.g is not applied). Pay-only carryover CH go to your general make-up bank (11.N.12)',
     },
   ],
 

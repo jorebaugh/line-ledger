@@ -4,10 +4,10 @@
 
 import {
   todayISO, periodFromISO, periodName, periodIndex, shiftPeriod, formatDate, parseHours, parseMoney,
-  formatHours as H, formatMoney as $,
+  formatHours as H, formatMoney as $, ruleAt,
 } from '../core.js';
 import { RULES } from '../../rules.js';
-import { ROW_TYPES, ASSIGNMENTS, estimateNet, auditCheck, seatName, fleetName, payContext } from '../paymath.js';
+import { ROW_TYPES, ASSIGNMENTS, assignInfo, estimateNet, auditCheck, seatName, fleetName, payContext } from '../paymath.js';
 import { parseRecap, recapToTrip, reconcileRecapTrip, fareCredit } from '../recap.js';
 import { ensurePeriod, ensureDev, newTrip, newRow, newDutyPeriod } from '../store.js';
 import {
@@ -169,13 +169,13 @@ function outputs(app, v) {
     totals: totalsHTML(x, v),
     audit: auditHTML(x, v),
     history: historyHTML(x, app, v),
-    hidden: c.payOnly && c.hiddenRowIds.length ? `<p class="note small">Pay-only bid period: ${c.hiddenRowIds.length === 1 ? 'one row is' : `${c.hiddenRowIds.length} rows are`} set aside. Untick pay-only to bring ${c.hiddenRowIds.length === 1 ? 'it' : 'them'} back.</p>`
+    hidden: c.payOnly && c.hiddenRowIds.length ? `<p class="note small">Pay-only bid period: ${c.hiddenRowIds.length === 1 ? 'one row is' : `${c.hiddenRowIds.length} rows are`} set aside: a pay-only line has no line flying of its own. Untick pay-only to bring ${c.hiddenRowIds.length === 1 ? 'it' : 'them'} back.</p>`
       : c.hiddenRowIds.length ? `<p class="note small">Per diem and override now come from your trips, so ${c.hiddenRowIds.length === 1 ? 'one manual row is' : `${c.hiddenRowIds.length} manual rows are`} set aside. Remove every trip to bring ${c.hiddenRowIds.length === 1 ? 'it' : 'them'} back.</p>` : '',
   };
   c.trips.forEach((t) => {
     const id = t.trip.id;
-    out[`trip-title-${id}`] = esc(t.trip.label?.trim() || `${ASSIGNMENTS[t.trip.assign]?.label || 'Trip'}`);
-    out[`trip-meta-${id}`] = `${ASSIGNMENTS[t.trip.assign]?.short} · ${t.trip.intl ? 'Intl' : 'Dom'} · ${H(t.schedMin)} CH${t.bkoMin ? ` · BKO ${H(t.bkoMin)}` : ''}${t.overageMin ? ` · OVG ${H(t.overageMin)}` : ''}`;
+    out[`trip-title-${id}`] = esc(t.trip.label?.trim() || assignInfo(t.trip.assign, c.payOnly).label);
+    out[`trip-meta-${id}`] = `${assignInfo(t.trip.assign, c.payOnly).short} · ${t.trip.intl ? 'Intl' : 'Dom'} · ${H(t.schedMin)} CH${t.bkoMin ? ` · BKO ${H(t.bkoMin)}` : ''}${t.overageMin ? ` · OVG ${H(t.overageMin)}` : ''}`;
     out[`trip-bko-${id}`] = `${t.bkoMin ? `BKO ${H(t.bkoMin)}` : t.bkoPending ? 'awaiting block-in' : 'none'}${t.autoOverageMin ? ` · overage ${H(t.autoOverageMin)}` : ''}`;
     out[`trip-sum-${id}`] = `${$(t.totalCents, { sign: true })}`;
     const rc = t.trip.recap;
@@ -215,7 +215,7 @@ function dutyPeriodsHTML(t) {
     </div>`;
 }
 
-function tripCard(t, code) {
+function tripCard(t, code, payOnly = false) {
   const id = t.id;
   const open = openTrips.has(id);
   const bkoField = t.bkoMode === 'actual' ? 'actual' : 'bko';
@@ -228,8 +228,10 @@ function tripCard(t, code) {
     </div>
     <div class="trip-body" ${open ? '' : 'hidden'}>
       <label class="f"><span>Label</span><input data-f="label" value="${esc(t.label)}" placeholder="e.g. MEM–ANC–HKG" autocomplete="off"></label>
-      <div class="f"><span>Assignment</span>${seg(`assign-${id}`, [['line', 'Line'], ['draft', 'VLT/DRF'], ['cmu', 'CMU'], ['pmu', 'PMU/SMU'], ['reserve', 'Rsv']], t.assign, { attrs: 'data-f="assign"', cls: 'seg-small' })}
-        <p class="hint">${esc(ASSIGNMENTS[t.assign]?.label || '')}: ${esc(ASSIGNMENTS[t.assign]?.codes || '')}</p></div>
+      <div class="f"><span>Assignment</span>${payOnly
+        ? seg(`assign-${id}`, [['line', 'M/U'], ['draft', 'VLT/DRF/AVA'], ['cmu', 'CMU'], ['pmu', 'PMU/SMU']], t.assign === 'reserve' ? 'line' : t.assign, { attrs: 'data-f="assign"', cls: 'seg-small' })
+        : seg(`assign-${id}`, [['line', 'Line'], ['draft', 'VLT/DRF/AVA'], ['cmu', 'CMU'], ['pmu', 'PMU/SMU'], ['reserve', 'Rsv']], t.assign, { attrs: 'data-f="assign"', cls: 'seg-small' })}
+        <p class="hint">${esc(assignInfo(t.assign, payOnly).label)}: ${esc(assignInfo(t.assign, payOnly).codes)}${payOnly ? '. Paid on top of your pay-only line.' : ''}</p></div>
       <div class="f"><span>Flying ${confirmPill}</span>${seg(`intl-${id}`, [['0', 'Domestic'], ['1', 'International']], t.intl ? '1' : '0', { attrs: 'data-f="intl"', cls: 'seg-small' })}</div>
       <div class="grid2">
         ${hoursInput('sched', t.sched, '30:00', 'Trip guarantee CH')}
@@ -359,18 +361,18 @@ export default {
       <section class="card">
         <div class="row-head"><h2>Guarantee (${v.c.gLabel})</h2>${seg('weeks-p', [['4', '4 wk'], ['5', '5 wk'], ['6', '6 wk']], String(v.c.weeks), { attrs: 'data-p="weeks"', cls: 'seg-small seg-inline' })}</div>
         ${app.state.profile.role || cur.payOnly ? `<label class="check"><input type="checkbox" data-p="payOnly" ${cur.payOnly ? 'checked' : ''}><span>Pay-only line this bid period <small>instructional bid period</small></span></label>
-        ${cur.payOnly ? `<p class="hint">Paid the ${v.c.gLabel} of your awarded pay-only line plus your instructor override. No trips, so no trip per diem or override this bid period. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : ''}
+        ${cur.payOnly ? `<p class="hint">Paid the ${v.c.gLabel} of your awarded pay-only line plus your instructor override. Trips you pick up (M/U, VLT/DRF/AVA, CMU, PMU) pay on top, with their per diem. Last bid period's per diem and extras still pay on the ${formatDate(v.checks.mid.date)} check (Sec. 11.N.25.b.i, 11.M.13.b).</p>` : ''}` : ''}
         <label class="f"><span>Your awarded ${cur.payOnly ? 'pay-only line ' : ''}${v.c.gLabel} (credit hours)</span>
           <input data-p="guarantee" value="${esc(cur.guarantee)}" placeholder="${v.c.guarantee.source === 'typical' ? `${esc(app.state.profile.lineValue)} typical` : `${H(v.c.guarantee.minMinutes)} minimum`}" autocomplete="off" spellcheck="false"></label>
         ${o('guarantee')}
       </section>
 
-      ${cur.payOnly ? `<section class="card"><h2>Trips</h2><p class="muted small">Pay-only bid period: trips aren't counted${v.c.hiddenTrips ? ` (${v.c.hiddenTrips} set aside until you untick pay-only)` : ''}. Add day-off instruction or other pay under Quick add-ons.</p></section>` : `<section class="card">
+      <section class="card">
         <div class="row-head"><h2>Trips</h2>
           <span class="btn-pair"><button type="button" class="btn small" data-act="paste-recap">Paste recap</button><button type="button" class="btn small primary" data-act="add-trip">+ Add trip</button></span></div>
-        <p class="muted small">Optional, for exact math. Once you add a trip, per diem and override come from your trips.</p>
-        <div class="trips">${cur.trips.map((t) => tripCard(t, code)).join('')}</div>
-      </section>`}
+        <p class="muted small">${cur.payOnly ? 'Trips you pick up on top of your pay-only line: M/U, VLT/DRF/AVA, CMU, PMU/SMU.' : 'Optional, for exact math.'} Once you add a trip, per diem and override come from your trips.</p>
+        <div class="trips">${cur.trips.map((t) => tripCard(t, code, !!cur.payOnly)).join('')}</div>
+      </section>
 
       <section class="card">
         <div class="row-head"><h2>Quick add-ons</h2><button type="button" class="btn small" data-act="add-row">+ Add</button></div>
@@ -602,7 +604,7 @@ export default {
       } else if (a === 'add-row') {
         const list = Object.entries(ROW_TYPES)
           .filter(([k]) => !(p.trips.length && (k === 'perdiem' || k === 'override')))
-          .filter(([k]) => (p.payOnly ? ['adjust', 'other', 'dayoff'].includes(k) : true) && (k !== 'dayoff' || state.profile.role))
+          .filter(([k]) => !(p.payOnly && ruleAt(RULES, 'payOnlyLine', code).value.setAsideRows.includes(k)) && (k !== 'dayoff' || state.profile.role))
           .map(([k, t]) => `<button type="button" class="pick" data-type="${k}"><b>${esc(t.label)}</b><span class="muted small">${esc(t.hint)}</span></button>`).join('');
         openSheet('Add to this bid period', `<div class="picks">${list}</div>`, (body, close) => {
           body.addEventListener('click', (ev) => {
