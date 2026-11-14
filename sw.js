@@ -1,6 +1,6 @@
 // Offline support. The whole app is cached as one version, so a phone never mixes old and new files.
 // When you change any file, bump APP_VERSION in config.js and VERSION here to match (a test checks).
-const VERSION = 'line-ledger-0.6.2';
+const VERSION = 'line-ledger-0.6.3';
 const FILES = [
   './',
   'index.html',
@@ -39,13 +39,23 @@ const FILES = [
   'js/screens/stub-sheet.js',
 ];
 
+// crewport.co used to run Crewport Car Share, whose offline worker also lived at /sw.js. When this
+// worker replaces one that isn't Line Ledger's (no line-ledger cache yet), it takes over right away
+// instead of waiting, so old Car Share visitors land on Line Ledger. Line Ledger updates still wait
+// for the user's "Reload".
+const OLD_APP_CACHES = ['crewport-'];
+
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))));
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+    .then(() => caches.keys())
+    .then((keys) => { if (!keys.some((k) => k.startsWith('line-ledger-') && k !== VERSION)) self.skipWaiting(); }));
 });
 
 self.addEventListener('activate', (e) => {
+  const stale = (k) => (k.startsWith('line-ledger-') && k !== VERSION) || OLD_APP_CACHES.some((p) => k.startsWith(p));
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k.startsWith('line-ledger-') && k !== VERSION).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter(stale).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 

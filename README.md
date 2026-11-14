@@ -72,8 +72,10 @@ if they fail or if anything under `tests/` is tracked.
 
 1. Push this folder to the repository's `main` branch.
 2. Repository Settings, then Pages: deploy from branch `main`, folder `/ (root)`. `.nojekyll` serves files as-is.
-3. The site is served at https://crewport.co (the `CNAME` file; GoDaddy DNS: `@` A record to GitHub Pages,
-   `www` CNAME to `jorebaugh.github.io`). The github.io address forwards there. All paths are relative.
+3. The site is served at https://www.crewport.co (the `CNAME` file; GoDaddy DNS: `@` A record to GitHub Pages,
+   `www` CNAME to `jorebaugh.github.io`). crewport.co and the github.io address forward there. www is the main
+   address on purpose: Crewport Car Share's offline worker lived at www.crewport.co/sw.js, and Line Ledger's `sw.js`
+   replaces it there. All paths are relative.
 
 Saved data is per web address. Moving the app to a different address later leaves everyone's entries behind
 at the old one (they can bring them over with Settings, Export and Import).
