@@ -42,6 +42,23 @@ const TOKEN = /[+-]?\d{1,3}h\d{2}|[+-]?\d{1,2}:\d{2}/g;
 const signed = (t) => t.startsWith('+') || t.startsWith('-');
 const hm = (t) => (t == null ? null : parseHours(t.replace(/^[+-]/, '')));
 
+// A paste can hold several recaps, one after another (a whole month). Each starts at its own header:
+// trip number, start date, base, equipment. The same header repeated belongs to the same trip.
+const HEADER = /(\d{2,5})\s+(\d{2})([A-Za-z]{3})(\d{4})\s+([A-Z]{3})\s+([A-Z0-9]{2,3})(?:\s*\(([A-Z]+)\))?(?:\s*Rv(\d+))?/g;
+export function splitRecaps(text) {
+  const s = String(text || '').replace(/\r/g, '');
+  const heads = [];
+  for (const m of s.matchAll(HEADER)) {
+    const key = `${m[1]}/${m[2]}${m[3]}${m[4]}`;
+    if (!heads.length || heads[heads.length - 1].key !== key) heads.push({ key, at: m.index });
+  }
+  if (heads.length <= 1) return [s];
+  return heads.map((h, i) => s.slice(i === 0 ? 0 : h.at, i + 1 < heads.length ? heads[i + 1].at : s.length));
+}
+
+// Every readable recap in a paste, in the order pasted.
+export const parseRecaps = (text) => splitRecaps(text).map((t) => parseRecap(t)).filter((r) => r.ok);
+
 export function parseRecap(text) {
   const s = String(text || '').replace(/\r/g, '');
   const warnings = [];

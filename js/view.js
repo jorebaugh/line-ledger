@@ -86,6 +86,7 @@ export function entryTitle(entry) {
   if (entry.trip) return entry.trip.label?.trim() || `${ASSIGNMENTS[entry.trip.assign]?.label || 'Trip'}`;
   if (entry.row?.whatIf) return 'What-if draft';
   const t = ROW_TYPES[entry.row?.type];
+  if (entry.row?.type === 'disrupt') return entry.items[0]?.label || t.label;
   return (entry.row?.type === 'other' || entry.row?.type === 'adjust') && entry.row.label?.trim() ? entry.row.label.trim() : t?.label || 'Add-on';
 }
 

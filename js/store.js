@@ -110,7 +110,7 @@ export function newDutyPeriod(state) {
 }
 
 export function newRow(state, type) {
-  return { id: newId(state), type, hours: '', tafbDom: '', tafbIntl: '', label: '', amount: '', gpe: false };
+  return { id: newId(state), type, hours: '', tafbDom: '', tafbIntl: '', label: '', amount: '', gpe: false, kind: '', count: '1', logSent: false };
 }
 
 export function exportJSON(state) {

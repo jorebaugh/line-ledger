@@ -31,6 +31,24 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
 - 401(k): year to date from a pasted pay stub (or typed, or estimated), projected check by check to
   December 31 against the employee, total additions and compensation limits, with the after-tax % that
   lands on the limit. A pasted stub can also set withholding, other deductions and elections.
+- Check a pay stub, line by line (`js/audit.js`): a saved stub (PDF or paste) is lined up against the app's
+  figures for that check. The 15th is half of this bid period's guarantee plus everything above guarantee from
+  the bid period before; the last-day check is the other half. Rows: half of guarantee, pay above guarantee,
+  international override, instructor override, per diem. Each row opens to show the stub's pay codes next to
+  the app's lines. A short row names the line that looks missing, or sizes the gap in credit hours, and
+  "Write up the short lines" builds a plain-text pay question with the contract section for each line (copied
+  by the pilot; nothing is sent). Only pay codes seen on real stubs are mapped one to one (BLG, per diem,
+  Intl, InstrPilot); every other code is compared as one "pay above guarantee" total.
+- Disruption pay (`disruptionPay` in `rules.js`): 4.W landing, duty period, layover, crew designation,
+  out-and-back, single layover and day-to-critical disruptions; 4.X FAR extension; 4.Y extra duty period; 4.Z
+  recall from rest; 4.AA.3 base replacement; 4.CC weather replacement; 4.GG and 4.HH critical period and
+  intermediate stop events; 4.U taxi pay; the two reserve disruption pays in 25.M. Each row says whether a
+  pay log is needed: always (4.U.2), until the December 2026 bid period for the new 4.W triggers (Implementation
+  LOA, Appendix A), or "the contract does not say". Rows not marked sent show on Home as pay logs to send.
+- A whole month of Trip Recaps in one paste: recaps pasted one after another are split at each trip header,
+  listed with tick boxes, and each goes to the bid period it started in. Trips already added are unticked.
+- What's a trip worth: paste a trip (open time, draft offer or recap) and see what it adds on top of guarantee
+  at 150%, 125% or 100%, the rough take-home, the take-home per hour and per day away, and the check it lands on.
 - Take-home by check: the 15th and the end-of-month check keep their own withholding percentage and other
   deductions (`withholding`/`otherDed` and `withholdingEnd`/`otherDedEnd`; a blank one borrows the other's).
   A stub fills in the check it belongs to, by its pay period. Retiree health (PRP/VEBA) comes off the 15th
@@ -137,6 +155,7 @@ js/core.js          hours/money parsing, bid period codes, rule lookup
 js/paymath.js       pay, trip, BKO/OSC, checks, net, audit
 js/recap.js         Trip Recap / pairing paste reader, contract credit math (SCH, OSC, ACH)
 js/stub.js          pay stub paste reader
+js/audit.js         line-by-line check of a saved stub against the app's figures, and the pay question text
 js/k401.js          401(k) year to date and projection
 js/retire.js        retirement election comparison
 js/pdftext.js       pay stub PDF to text, on the phone

@@ -30,7 +30,8 @@ export function stubSummaryHTML(s) {
     </ul>`;
 }
 
-export function openStubSheet(app) {
+// onSave(stub): called after the stub is saved and before the screen redraws.
+export function openStubSheet(app, { onSave } = {}) {
   openSheet('Add a pay stub', `
     <p class="small muted">Pick the PDF of your earnings statement, or open it, select all, copy and paste the text. It's read on this phone only. Only pay lines and dates are read: your name, address, employee number and account are ignored and never saved.</p>
     <label class="btn primary file-btn">Choose the stub PDF<input type="file" accept="application/pdf,.pdf" data-stub-file></label>
@@ -83,7 +84,7 @@ export function openStubSheet(app) {
     pv.addEventListener('click', (ev) => {
       if (!ev.target.closest('[data-save-stub]') || !s) return;
       const st = app.state;
-      st.stubs = [...(st.stubs || []).filter((x) => x.adviceDate !== s.adviceDate), s].sort((a, b) => (a.adviceDate < b.adviceDate ? -1 : 1)).slice(-6);
+      st.stubs = [...(st.stubs || []).filter((x) => x.adviceDate !== s.adviceDate), s].sort((a, b) => (a.adviceDate < b.adviceDate ? -1 : 1)).slice(-26);
       const use = (k) => pv.querySelector(`[data-use="${k}"]`)?.checked;
       applyStub(st.profile, s, { wh: !!use('wh'), other: !!use('other'), whPct: pv.querySelector('[data-wh]')?.value });
       if (use('elections')) {
@@ -96,6 +97,7 @@ export function openStubSheet(app) {
       const o = w === 'mid' ? 'end' : 'mid';
       const needOther = !st.stubs.some((x) => stubWhich(x) === o);
       close();
+      if (onSave) onSave(s);
       app.save();
       toast(needOther ? `Saved your ${CHECK_NAME[w]} check. Now add ${CHECK_A[o]} stub.` : `Saved the ${formatDate(s.adviceDate)} stub`);
       app.render({ keepScroll: true });

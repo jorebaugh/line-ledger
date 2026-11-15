@@ -1,6 +1,8 @@
 import { RULES } from '../../rules.js';
 import { todayISO, periodFromISO, periodName, formatDate, daysBetween, ruleAt, formatHours as H, formatMoney as $ } from '../core.js';
-import { nextCheck, seatName, fleetName } from '../paymath.js';
+import { nextCheck, seatName, fleetName, payLogsDue } from '../paymath.js';
+import { auditStub, auditSentence, stubCode, stubsFor } from '../audit.js';
+import { stubWhich } from '../stub.js';
 import { periodView, checkExplain, netExplain, rateExplain, guaranteeExplain, annualExplain, earnedExplain } from '../view.js';
 import { esc } from '../ui.js';
 import { bankSnapshot } from './banks.js';
@@ -17,6 +19,15 @@ export default {
       if (e.target.closest('[data-install]')) { promptInstall().then(() => app.render({ keepScroll: true })); return; }
       if (e.target.closest('[data-guide-dismiss]')) { app.state.guide = 'dismissed'; app.save(); app.render({ keepScroll: true }); return; }
       if (e.target.closest('[data-install-dismiss]')) { app.state.installHint = 'dismissed'; app.save(); app.render({ keepScroll: true }); return; }
+      // A link that opens Pay on a given bid period (and, for a stub, on that check).
+      const vc = e.target.closest('[data-view-code]');
+      if (vc) {
+        app.state.viewCode = vc.dataset.viewCode;
+        const per = app.state.periods[vc.dataset.viewCode];
+        if (per && vc.dataset.check) per.audit = { ...(per.audit || { actual: '' }), check: vc.dataset.check };
+        app.save();
+        return;
+      }
       const a = e.target.closest('[data-tab-to]');
       if (!a) return;
       const dev = ensureDev(app.state);
@@ -46,10 +57,21 @@ export default {
     const eligible = p.ygMode === 'doh' && p.doh ? p.doh < ret.eligibleHiredBefore : null;
 
     const curP = app.state.periods[code] || {};
+    const curStubs = stubsFor(app.state.stubs, code);
+    // The newest saved stub, checked line by line against its own bid period.
+    const stubs = app.state.stubs || [];
+    const last = stubs[stubs.length - 1] || null;
+    const lastCode = last ? stubCode(last) : null;
+    const la = last ? auditStub(last, lastCode === code ? v : periodView(app.state, lastCode, { create: false, whatIf: false })) : null;
+    const stubSub = !la ? 'Add the stub PDF and every line gets checked'
+      : la.prevEmpty && la.verdict !== 'match' ? `${formatDate(la.date)} stub saved. Add the bid period before it to check the extras.`
+      : esc(auditSentence(la));
+    // Pay logs not yet marked sent, this bid period and the one before.
+    const logs = [...payLogsDue(c).map((l) => ({ ...l, code })), ...(v.p ? payLogsDue(v.p).map((l) => ({ ...l, code: v.prevCode })) : [])];
     const steps = [
       { done: !!String(curP.guarantee || '').trim(), href: '#/pay?go=line', t: 'Enter your line value', s: `Your ${c.gLabel} from the bid package` },
       { done: (curP.trips || []).length > 0, href: '#/pay?go=trips', t: 'Add your trips', s: 'Paste a trip recap, or type the hours' },
-      { done: !!String(curP.audit?.actual || '').trim(), href: '#/pay?go=stub', t: 'Check it against your pay stub', s: 'Type the gross from your stub' },
+      { done: !!String(curP.audit?.actual || '').trim() || !!(curStubs.mid || curStubs.end), href: '#/pay?go=stub', t: 'Check it against your pay stub', s: 'Add the stub PDF and every line gets checked' },
     ];
     const showGuide = app.state.guide !== 'dismissed' && steps.some((st) => !st.done);
     const act = (href, title, sub, right = '', attrs = '', tone = 'muted') => `
@@ -100,8 +122,9 @@ export default {
         <h2>Pay</h2>
         <div class="acts">
           ${act('#/pay?go=trips', 'Add a trip', 'Paste a trip recap, or type the hours')}
-          ${act('#/pay?go=whatif', 'See what a draft is worth', 'Pick the hours and watch the check change')}
-          ${act('#/pay?go=stub', 'Check a pay stub', 'See if the check matches')}
+          ${logs.length ? act('#/pay?go=other', `${logs.length} pay log${logs.length === 1 ? '' : 's'} to send`, esc(logs.map((l) => l.label).join(', ')), $(logs.reduce((sum, l) => sum + l.cents, 0)), `data-view-code="${logs[0].code}"`, 'alert-text') : ''}
+          ${act('#/pay?go=whatif', "What's a trip worth?", 'Paste a trip, see the take-home')}
+          ${act('#/pay?go=stub', 'Check a pay stub', stubSub, la && la.verdict === 'short' && !la.prevEmpty ? `−${$(Math.abs(la.gross.diff))}` : '', last ? `data-view-code="${lastCode}" data-check="${stubWhich(last)}"` : '', la && la.verdict === 'short' && !la.prevEmpty ? 'alert-text' : 'muted')}
         </div>
       </section>
 

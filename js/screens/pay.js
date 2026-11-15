@@ -7,8 +7,11 @@ import {
   formatHours as H, formatMoney as $, ruleAt,
 } from '../core.js';
 import { RULES } from '../../rules.js';
-import { ROW_TYPES, ASSIGNMENTS, assignInfo, estimateNet, auditCheck, seatName, fleetName, payContext } from '../paymath.js';
-import { parseRecap, recapToTrip, reconcileRecapTrip, fareCredit } from '../recap.js';
+import { ROW_TYPES, ASSIGNMENTS, assignInfo, estimateNet, auditCheck, seatName, fleetName, payContext, payLogStatus, tripWorth, checkDates } from '../paymath.js';
+import { parseRecaps, recapToTrip, reconcileRecapTrip, fareCredit } from '../recap.js';
+import { auditStub, auditSentence, claimNote, stubsFor, stubCode } from '../audit.js';
+import { stubWhich } from '../stub.js';
+import { openStubSheet } from './stub-sheet.js';
 import { ensurePeriod, ensureDev, newTrip, newRow, newDutyPeriod } from '../store.js';
 import {
   periodView, checkExplain, netExplain, rateExplain, guaranteeExplain, entryExplain, itemExplain, entryTitle,
@@ -117,11 +120,52 @@ function totalsHTML(x, v) {
     </ul>`;
 }
 
-function auditHTML(x, v) {
+// Line-by-line: each row is the stub's amount, what the entries add up to, and the gap. Open a row
+// to see the stub's lines next to the app's.
+function stubAuditHTML(x, v, s) {
+  const a = auditStub(s, v);
+  const prev = periodName(v.prevCode);
+  const tone = a.verdict === 'match' ? 'good' : a.verdict === 'short' ? 'audit-diff alert' : 'audit-diff';
+  const head = `<p class="${tone}"><b>${esc(auditSentence(a))}</b></p>`;
+  if (!a.lineByLine) return `${head}<p class="note small">This stub was saved before the line-by-line check. Add it again to see every line.</p>`;
+  const cause = (r) => {
+    if (r.status === 'over') return '<p class="note small">The stub paid more here than you entered. Look for a trip or pay you have not added, or pay from an earlier bid period.</p>';
+    if (r.status !== 'short') return '';
+    if (r.likely) return `<p class="note small">Looks like <b>${esc(r.likely.label)}</b> (${$(r.likely.cents)}) is not on this check.${r.likely.payLog?.need === 'yes' && !r.likely.logSent ? ' It is paid by pay log, and yours is not marked sent.' : ''}</p>`;
+    return r.hours ? `<p class="note small">No single line matches. The gap is about <b>${H(r.hours.at100)}</b> CH at 100%, or <b>${H(r.hours.at150)}</b> at 150%.</p>` : '';
+  };
+  const rows = a.rows.map((r) => `
+    <details class="audit-row ${r.status}">
+      <summary>
+        <span class="a-label">${esc(r.label)}<small>${r.kind === 'guarantee' ? periodName(v.code) : a.which === 'mid' ? `from ${prev}` : ''}</small></span>
+        <span class="a-nums num">${$(r.stubCents)}<small>expected ${$(r.appCents)}</small></span>
+        <span class="a-pill ${r.status}">${r.status === 'match' ? 'matches' : `${$(Math.abs(r.diff))} ${r.status}`}</span>
+      </summary>
+      <div class="a-body">
+        <b class="small">On the stub</b>
+        ${r.stubLines.length ? `<ul class="ledger">${r.stubLines.map((l) => `<li><span>${esc(l.label)}${l.units != null ? ` <small class="muted">${(l.units / 100).toFixed(2)} hrs</small>` : ''}</span><span class="num">${$(l.cur)}</span></li>`).join('')}</ul>` : '<p class="muted small">Nothing on the stub for this.</p>'}
+        <b class="small">From your entries</b>
+        ${r.appLines.length ? `<ul class="ledger">${r.appLines.map((l) => `<li><span>${esc(l.label)}</span>${x.money(l.cents, { title: l.label, lines: [l] }, { mark: false })}</li>`).join('')}</ul>` : '<p class="muted small">Nothing entered for this.</p>'}
+        ${cause(r)}
+      </div>
+    </details>`).join('');
+  const short = a.rows.some((r) => r.status === 'short');
+  return `${head}
+    ${a.prevEmpty ? `<p class="note small">Nothing is entered for ${prev} yet, and this check pays ${prev}'s extras. Add ${prev}'s trips and this gets a real answer.</p>
+      <button type="button" class="btn ghost small" data-act="goto" data-code="${v.prevCode}">Open ${prev} ${ICON.right}</button>` : ''}
+    <div class="audit-rows">${rows}</div>
+    ${a.logsDue.length ? `<p class="note small"><b>${a.logsDue.length === 1 ? 'One pay log is' : `${a.logsDue.length} pay logs are`} not marked sent:</b> ${a.logsDue.map((l) => esc(l.label)).join(', ')}. Pay by pay log does not show up until the pay log goes in.</p>` : ''}
+    ${short ? '<button type="button" class="btn wide mt" data-act="claim-note">Write up the short lines</button>' : ''}
+    <p class="hint">Checked against what you entered. Go over your entries before you send anything.</p>`;
+}
+
+function auditHTML(x, v, app) {
   const { cur, c, p, checks, ctx } = v;
   const which = cur.audit?.check === 'end' ? 'end' : 'mid';
+  const stub = stubsFor(app.state.stubs, v.code)[which];
+  if (stub) return stubAuditHTML(x, v, stub);
   const actual = parseMoney(cur.audit?.actual);
-  if (actual == null) return '<p class="muted small">Type the gross from your stub to compare. It stays on this phone.</p>';
+  if (actual == null) return `<p class="muted small">No stub saved for the ${formatDate(checks[which].date)} check. Add it and every line gets checked. It stays on this phone.</p>`;
   const est = checks[which].grossCents;
   const parts = [{ label: `Half of ${c.gLabel}`, cents: checks[which].halfCents }, ...(which === 'mid' && p ? extrasLines(p) : [])];
   const a = auditCheck(actual, est, parts, ctx);
@@ -168,7 +212,7 @@ function outputs(app, v) {
     whatif: whatIfHTML(x, v, app),
     last: lastPeriodHTML(x, v),
     totals: totalsHTML(x, v),
-    audit: auditHTML(x, v),
+    audit: auditHTML(x, v, app),
     history: historyHTML(x, app, v),
     hidden: c.payOnly && c.hiddenRowIds.length ? `<p class="note small">Pay-only bid period: ${c.hiddenRowIds.length === 1 ? 'one row is' : `${c.hiddenRowIds.length} rows are`} set aside: a pay-only line has no line flying of its own. Untick pay-only to bring ${c.hiddenRowIds.length === 1 ? 'it' : 'them'} back.</p>`
       : c.hiddenRowIds.length ? `<p class="note small">Per diem and override now come from your trips, so ${c.hiddenRowIds.length === 1 ? 'one manual row is' : `${c.hiddenRowIds.length} manual rows are`} set aside. Remove every trip to bring ${c.hiddenRowIds.length === 1 ? 'it' : 'them'} back.</p>` : '',
@@ -267,6 +311,19 @@ function rowCard(r, code, gMin) {
   if (r.type === 'perdiem') fields = `<div class="grid2">${hoursInput('tafbDom', r.tafbDom, '0:00', 'Domestic TAFB')}${hoursInput('tafbIntl', r.tafbIntl, '0:00', 'International TAFB')}</div>`;
   else if (r.type === 'adjust') fields = `<div class="grid2"><label class="f"><span>Label</span><input data-f="label" value="${esc(r.label)}" placeholder="e.g. LCA pay" autocomplete="off"></label><label class="f"><span>Amount</span><input data-f="amount" value="${esc(r.amount)}" inputmode="decimal" placeholder="$0.00 or -50" autocomplete="off"></label></div>`;
   else if (r.type === 'other') fields = `<div class="grid2"><label class="f"><span>Label</span><input data-f="label" value="${esc(r.label)}" placeholder="e.g. Sim support" autocomplete="off"></label>${hoursInput('hours', r.hours, '0:00', 'Credit hours')}</div>`;
+  else if (r.type === 'disrupt') {
+    const rule = ruleAt(RULES, 'disruptionPay', code);
+    const d = rule.value;
+    const k = d.kinds[r.kind];
+    const ch = (x) => (x.tiers ? `${H(x.tiers[0] * 60)} to ${H(x.tiers[x.tiers.length - 1] * 60)}` : H(Math.round(x.ch * 60)));
+    const log = k ? payLogStatus(r.kind, { code, rule: { disrupt: rule } }) : null;
+    fields = `
+      <label class="f"><span>What happened</span><select data-f="kind"><option value="">Pick one</option>${d.groups.map(([g, keys]) => `<optgroup label="${esc(g)}">${keys.map((key) => `<option value="${key}" ${key === r.kind ? 'selected' : ''}>${esc(d.kinds[key].label)} · ${ch(d.kinds[key])}</option>`).join('')}</optgroup>`).join('')}</select></label>
+      ${k ? `<p class="hint">${esc(k.what)} Sec. ${esc(k.sec)}.${k.sec.startsWith('4.W') ? ` Trips held as ${esc(d.eligibleCodes)}.` : ''}</p>` : ''}
+      <div class="grid2"><label class="f"><span>How many${k ? ` <small class="muted">${esc(k.per)}</small>` : ''}</span><input data-f="count" value="${esc(r.count ?? '1')}" inputmode="numeric" autocomplete="off"></label>
+        <label class="f"><span>Trip <small class="muted">optional</small></span><input data-f="label" value="${esc(r.label)}" placeholder="e.g. 422 MEM-ANC" autocomplete="off"></label></div>
+      ${log ? `<p class="note small ${log.need === 'yes' && !r.logSent ? 'alert' : ''}"><b>Pay log:</b> ${esc(log.text)}</p>${log.need === 'unsaid' ? '' : `<label class="check"><input type="checkbox" data-f="logSent" ${r.logSent ? 'checked' : ''}><span>Pay log sent</span></label>`}` : ''}`;
+  }
   else fields = hoursInput('hours', r.hours, r.auto === 'guarantee' ? `${H(gMin)} = your line value` : '0:00', 'Credit hours');
   return `
   <article class="addon" data-row="${r.id}">
@@ -320,6 +377,51 @@ function recapPreviewHTML(r, code) {
       <label class="f mt"><span>Add to bid period</span>
         <select data-recap-period>${options.map((c) => `<option value="${c}" ${c === startCode ? 'selected' : ''}>${periodName(c)}${c === startCode ? ' · trip start' : c === code ? ' · viewing' : ''}</option>`).join('')}</select></label>
       <button type="button" class="btn primary big mt" data-add-recap>Add trip</button>
+    </div>`;
+}
+
+const tripExists = (state, r) => Object.values(state.periods).some((p) => (p.trips || []).some((t) => t.recap && t.recap.tripNo === r.tripNo && t.recap.startDate === r.startDate));
+
+// Several recaps in one paste: tick the ones to add. Each goes to the bid period it started in.
+function recapsPreviewHTML(list, state, code) {
+  return `
+    <div class="recap-card">
+      <b>${list.length} trips found</b>
+      ${list.map((r, i) => {
+        const t = recapToTrip(r);
+        const dup = tripExists(state, r);
+        const target = r.startDate ? periodFromISO(r.startDate) : code;
+        return `<label class="check fare"><input type="checkbox" data-multi="${i}" ${dup ? '' : 'checked'}>
+          <span><b>${esc(t.label || 'Trip')}</b><br><small>${[r.startDate ? formatDate(r.startDate) : '', `${periodName(target)} bid period`, ASSIGNMENTS[t.assign].short, `${esc(t.sched)} CH`, dup ? 'already added' : ''].filter(Boolean).join(' · ')}</small></span></label>`;
+      }).join('')}
+      <p class="hint">Each trip goes into the bid period it started in. To bank a deadhead fare, paste that trip on its own.</p>
+      <button type="button" class="btn primary big mt" data-add-recaps>Add the ticked trips</button>
+    </div>`;
+}
+
+const WORTH_AS = [['draft', '150%', 'VLT / DRF / AVA'], ['pmu', '125%', 'PMU / SMU'], ['makeup', '100%', 'Make-up']];
+
+// What one pasted trip is worth if you pick it up.
+function worthHTML(r, t, w, target) {
+  const li = (l, val) => `<li><span>${l}</span><span class="num">${val}</span></li>`;
+  return `
+    <div class="recap-card">
+      <b>${esc(t.label || 'Trip')}</b>
+      <div class="muted small">${[r.startDate ? `Starts ${formatDate(r.startDate, { year: true })}` : '', r.international ? 'International' : 'Domestic', `${H(w.schedMin)} CH`, w.awayMin ? `${H(w.awayMin)} away` : ''].filter(Boolean).join(' · ')}</div>
+      <div class="f mt"><span>Paid as</span>${seg('worth-as', WORTH_AS, w.as, { attrs: 'data-worth-as', cls: 'seg-small' })}</div>
+      <div class="wi-amt">${$(w.grossCents, { sign: true })} <small>gross</small></div>
+      <ul class="ledger">
+        ${li('Take-home, rough', `≈ ${$(w.net.netCents)}`)}
+        ${w.perAwayHourCents != null ? li('Take-home per hour away', $(w.perAwayHourCents)) + li('Take-home per day away', $(w.perDayCents)) : ''}
+        ${li('Pay on top of guarantee', $(w.payCents))}
+        ${w.perDiemCents ? li('Per diem, not taxed', $(w.perDiemCents)) : ''}
+        ${li('Lands on', formatDate(checkDates(target).next, { year: true }))}
+      </ul>
+      <details class="more"><summary>The math</summary>
+        <ul class="math">${w.calc.items.map((i) => `<li><span class="m-label">${esc(i.label)}</span><span class="m-text">${esc(i.text)}</span><span class="m-amt">${$(i.cents)}</span></li>`).join('')}</ul>
+      </details>
+      <p class="hint">Take-home uses your 15th-check withholding and 401(k) elections; flat deductions come off either way. These are scheduled figures: block override and overage come after the trip is flown.</p>
+      <button type="button" class="btn primary big mt" data-add-priced>Add it to ${periodName(target)}</button>
     </div>`;
 }
 
@@ -382,26 +484,32 @@ export default {
       <section class="card" data-sec="trips">
         <h2><span class="step-n" aria-hidden="true">2</span> Your trips</h2>
         <p class="hint">${cur.payOnly ? 'Trips you pick up on top of your pay-only line.' : 'Add each trip you fly this bid period.'} Per diem and override then come from your trips.</p>
-        <button type="button" class="btn primary big wide" data-act="paste-recap">Paste a trip recap</button>
-        <p class="hint center">Fastest: copy the Trip Recap page and paste it. The app fills in the trip.</p>
+        <button type="button" class="btn primary big wide" data-act="paste-recap">Paste trip recaps</button>
+        <p class="hint center">Fastest: copy each Trip Recap page and paste them one after another. A whole month goes in at once.</p>
         <button type="button" class="btn wide" data-act="add-trip">Or type a trip in</button>
         <div class="trips">${cur.trips.map((t) => tripCard(t, code, !!cur.payOnly)).join('')}</div>
       </section>
 
       <section class="card" data-sec="other">
         <h2>Other pay</h2>
-        <p class="hint">Anything not tied to a trip above: draft or overage hours, reserve credit, per diem, a dollar adjustment.</p>
+        <p class="hint">Anything not tied to a trip above: disruption pay, draft or overage hours, reserve credit, per diem, a dollar adjustment.</p>
         <div class="addons">${shownRows.map((r) => rowCard(r, code, v.c.guarantee.minutes)).join('')}</div>
         ${o('hidden')}
-        <button type="button" class="btn wide mt" data-act="add-row">Add other pay</button>
+        <div class="grid2 mt"><button type="button" class="btn" data-act="add-disrupt">Add disruption pay</button><button type="button" class="btn" data-act="add-row">Add other pay</button></div>
       </section>
 
-      ${fold('audit', '<span class="step-n" aria-hidden="true">3</span> Check a pay stub', 'Type the gross from your stub to compare', `
+      ${fold('audit', '<span class="step-n" aria-hidden="true">3</span> Check a pay stub', 'Add the stub and every line gets checked', `
         ${seg('audit-check', [['mid', `${formatDate(v.checks.mid.date)} check`], ['end', `${formatDate(v.checks.end.date)} check`]], cur.audit?.check || 'mid', { attrs: 'data-a="check"' })}
-        <label class="f mt"><span>Gross on your stub</span><input data-a="actual" value="${esc(cur.audit?.actual || '')}" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>
-        ${o('audit')}`)}
-      ${fold('whatif', 'What if I pick up a draft?', 'Pick the hours and watch the check change', `
-        <div class="whatif">
+        <div class="mt">${o('audit')}</div>
+        <button type="button" class="btn primary wide mt" data-act="add-stub">Add a pay stub (PDF or paste)</button>
+        <details class="more"><summary>Or just type the gross</summary>
+          <label class="f mt"><span>Gross on your stub</span><input data-a="actual" value="${esc(cur.audit?.actual || '')}" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>
+          <p class="hint">Used when no stub is saved for that check.</p>
+        </details>`)}
+      ${fold('whatif', "What's a trip worth?", 'Paste a trip, or pick the hours', `
+        <button type="button" class="btn primary wide" data-act="price-trip">Paste a trip to price it</button>
+        <p class="hint center">Open time, a draft offer or a recap: see the take-home, and what it pays per hour away.</p>
+        <div class="whatif mt">
           <label class="wi-hours"><span>Draft hours</span><input class="wi-input num" data-p="whatIfTyped" inputmode="decimal" autocomplete="off" spellcheck="false" value="${cur.whatIf ? H(cur.whatIf) : ''}" placeholder="0:00" aria-label="Draft credit hours"><span>CH</span></label>
           <input type="range" min="0" max="2400" step="30" value="${Math.min(2400, cur.whatIf || 0)}" data-p="whatIf" aria-label="Draft hours to add">
           <div class="range-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40 CH</span></div>
@@ -474,7 +582,7 @@ export default {
         if (f === 'gpeCount') val = Number(t.value);
         entry[f] = val;
         if (kind === 'row') entry.preset = false;
-        if (['assign', 'intl', 'bkoMode'].includes(f)) { if (structural) rerender(); return; }
+        if (['assign', 'intl', 'bkoMode', 'kind', 'logSent'].includes(f)) { if (structural) rerender(); return; }
         refresh();
         return;
       }
@@ -548,18 +656,38 @@ export default {
         openTrips.add(t.id);
         rerender(`[data-trip="${t.id}"] input[data-f="sched"]`);
       } else if (a === 'paste-recap') {
-        openSheet('Paste a trip recap', `
-          <p class="small muted">Copy the whole Trip Recap (or pairing) page and paste it here. It's read on this phone only. Names and employee numbers are ignored and never saved.</p>
+        openSheet('Paste trip recaps', `
+          <p class="small muted">Copy the whole Trip Recap (or pairing) page and paste it here. Paste several, one after another, to add a whole month at once. It's read on this phone only. Names and employee numbers are ignored and never saved.</p>
           <textarea class="paste" rows="7" placeholder="Paste the recap text" aria-label="Recap text"></textarea>
           <div class="recap-preview"></div>`, (body, close) => {
           const ta = body.querySelector('textarea');
           const pv = body.querySelector('.recap-preview');
           let parsed = null;
+          let many = [];
           ta.addEventListener('input', () => {
             if (!ta.value.trim()) { pv.innerHTML = ''; return; }
-            parsed = parseRecap(ta.value);
-            if (!parsed.ok) { pv.innerHTML = '<p class="note small">No flight legs found in that text. Paste the full recap page.</p>'; return; }
-            pv.innerHTML = recapPreviewHTML(parsed, code);
+            many = parseRecaps(ta.value);
+            parsed = many.length === 1 ? many[0] : null;
+            if (!many.length) { pv.innerHTML = '<p class="note small">No flight legs found in that text. Paste the full recap page.</p>'; return; }
+            pv.innerHTML = parsed ? recapPreviewHTML(parsed, code) : recapsPreviewHTML(many, state, code);
+          });
+          // Several trips: add the ticked ones, each to the bid period it started in.
+          pv.addEventListener('click', (ev) => {
+            if (!ev.target.closest('[data-add-recaps]') || many.length < 2) return;
+            const picked = [...pv.querySelectorAll('[data-multi]:checked')].map((cb) => many[Number(cb.dataset.multi)]);
+            if (!picked.length) { toast('Tick at least one trip'); return; }
+            const targets = new Set();
+            for (const r of picked) {
+              const target = r.startDate ? periodFromISO(r.startDate) : code;
+              const fields = reconcileRecapTrip(recapToTrip(r), payContext(RULES, state.profile, target));
+              ensurePeriod(state, target).trips.push({ ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) });
+              targets.add(target);
+            }
+            if (!targets.has(code)) state.viewCode = [...targets].sort((a, b) => periodIndex(b) - periodIndex(a))[0];
+            close();
+            app.save();
+            toast(`Added ${picked.length} trip${picked.length === 1 ? '' : 's'} to ${[...targets].sort((a, b) => periodIndex(a) - periodIndex(b)).map(periodName).join(' and ')}`);
+            app.render();
           });
           const when = () => pv.querySelector('[data-fare-when]:checked')?.value || 'before';
           pv.addEventListener('change', (ev) => {
@@ -596,6 +724,75 @@ export default {
           });
         });
         setTimeout(() => document.querySelector('.sheet textarea')?.focus(), 50);
+      } else if (a === 'price-trip') {
+        openSheet("What's this trip worth?", `
+          <p class="small muted">Copy the trip's page (open time, a draft offer, or a recap) and paste it here. It's read on this phone only.</p>
+          <textarea class="paste" rows="6" placeholder="Paste the trip" aria-label="Trip text"></textarea>
+          <div class="worth-preview"></div>`, (body, close) => {
+          const ta = body.querySelector('textarea');
+          const pv = body.querySelector('.worth-preview');
+          let r = null;
+          let as = 'draft';
+          const target = () => (r?.startDate ? periodFromISO(r.startDate) : code);
+          const draw = () => {
+            const t = recapToTrip(r);
+            pv.innerHTML = worthHTML(r, t, tripWorth(t, payContext(RULES, state.profile, target()), state.profile, as), target());
+          };
+          ta.addEventListener('input', () => {
+            r = ta.value.trim() ? parseRecaps(ta.value)[0] || null : null;
+            if (!ta.value.trim()) pv.innerHTML = '';
+            else if (!r) pv.innerHTML = '<p class="note small">No flight legs found in that text. Paste the whole trip page.</p>';
+            else draw();
+          });
+          pv.addEventListener('change', (ev) => { if (ev.target.matches('[data-worth-as]') && r) { as = ev.target.value; draw(); } });
+          pv.addEventListener('click', (ev) => {
+            if (!ev.target.closest('[data-add-priced]') || !r) return;
+            const tgt = target();
+            const dest = ensurePeriod(state, tgt);
+            // Make-up at 100% is a line trip in the app: it counts toward guarantee unless the line is pay-only.
+            const fields = reconcileRecapTrip({ ...recapToTrip(r), assign: as === 'makeup' ? 'line' : as }, payContext(RULES, state.profile, tgt));
+            const trip = { ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) };
+            dest.trips.push(trip);
+            openTrips.add(trip.id);
+            state.viewCode = tgt;
+            close();
+            app.save();
+            toast(`Added ${trip.label || 'trip'} to ${periodName(tgt)}`);
+            app.render();
+          });
+        });
+        setTimeout(() => document.querySelector('.sheet textarea')?.focus(), 50);
+      } else if (a === 'add-stub') {
+        // The stub lands on the bid period and check it belongs to, wherever it was added from.
+        openStubSheet(app, {
+          onSave: (st) => {
+            const sc = stubCode(st);
+            const dest = ensurePeriod(state, sc);
+            dest.audit = { ...(dest.audit || { actual: '' }), check: stubWhich(st) };
+            state.viewCode = sc;
+            openFolds.add('audit');
+            pendingGo = 'stub';
+          },
+        });
+      } else if (a === 'claim-note') {
+        const v = periodView(state, code);
+        const st = stubsFor(state.stubs, code)[v.cur.audit?.check === 'end' ? 'end' : 'mid'];
+        if (!st) return;
+        const text = claimNote(auditStub(st, v), v);
+        openSheet('Pay question', `
+          <p class="small muted">The short lines, with what you entered and the contract section for each. Copy it into your own message or pay log. Nothing is sent from here.</p>
+          <textarea class="paste" rows="12" readonly aria-label="Pay question text">${esc(text)}</textarea>
+          <button type="button" class="btn primary big wide mt" data-copy>Copy</button>`, (body) => {
+          const ta = body.querySelector('textarea');
+          body.querySelector('[data-copy]').addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(ta.value); toast('Copied'); }
+            catch { ta.focus(); ta.select(); toast('Select all and copy'); }
+          });
+        });
+      } else if (a === 'add-disrupt') {
+        const r = newRow(state, 'disrupt');
+        p.rows.push(r);
+        rerender(`[data-row="${r.id}"] select[data-f="kind"]`);
       } else if (a === 'add-dp') {
         const trip = findTrip(b.closest('[data-trip]').dataset.trip);
         trip.dps = trip.dps || [];
@@ -633,8 +830,8 @@ export default {
             const r = newRow(state, pick.dataset.type);
             p.rows.push(r);
             close();
-            const first = r.type === 'perdiem' ? 'tafbDom' : r.type === 'adjust' || r.type === 'other' ? 'label' : 'hours';
-            rerender(`[data-row="${r.id}"] input[data-f="${first}"]`);
+            const first = r.type === 'perdiem' ? 'tafbDom' : r.type === 'adjust' || r.type === 'other' ? 'label' : r.type === 'disrupt' ? 'kind' : 'hours';
+            rerender(`[data-row="${r.id}"] [data-f="${first}"]`);
           });
         });
       } else if (a === 'save-period') {

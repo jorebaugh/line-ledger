@@ -1,6 +1,6 @@
 // Offline support. The whole app is cached as one version, so a phone never mixes old and new files.
 // When you change any file, bump APP_VERSION in config.js and VERSION here to match (a test checks).
-const VERSION = 'line-ledger-0.8.1';
+const VERSION = 'line-ledger-0.9.0';
 const FILES = [
   './',
   'index.html',
@@ -13,6 +13,7 @@ const FILES = [
   'icons/maskable-512.png',
   'icons/apple-touch-icon.png',
   'js/app.js',
+  'js/audit.js',
   'js/banks.js',
   'js/core.js',
   'js/feedback.js',

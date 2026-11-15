@@ -321,6 +321,66 @@ export const RULES = {
     },
   ],
 
+  // Disruption pay and the "disruption-like" pays the contract lists together (7.I.2.b note:
+  // 4.W.1, X, Y, Z, AA.3, CC, GG, HH), plus taxi pay and the two reserve disruption pays.
+  //   ch       credit hours each          tiers  credit hours for 1, 2, 3+ on one trip
+  //   per      what you count             rate   'normal' = the paragraph says "normal pay rate"
+  //   payLog   'always'    the contract says it is paid on a pay log
+  //            'untilAuto' paid by pay log until the company automates it (autoFrom)
+  //            'unsaid'    the contract does not say
+  disruptionPay: [
+    {
+      effectiveFrom: 'JUL26',
+      value: {
+        autoFrom: 'DEC26',
+        eligibleCodes: 'TRP, SON, SWP, SMU, M/U, MUV, MUD, MUS, PDO, PNP, AFB, PRO, RSV (R-24) and CIA',
+        groups: [
+          ['Trip revised (4.W)', ['landing', 'dutyPeriod', 'dhDeletedIntl', 'layover', 'crew', 'outAndBack', 'singleLayover', 'dayToCritical']],
+          ['Duty, rest and replacement (4.X to 4.CC)', ['extraDutyPeriod', 'farExtension', 'recall', 'baseReplacement', 'weatherReplacement']],
+          ['Domestic duty periods (4.GG, 4.HH)', ['criticalStop', 'criticalLanding', 'criticalOutBack', 'criticalLong', 'intermediateStop']],
+          ['Other', ['taxi', 'taxiAlone', 'rpChange', 'rDayMoved']],
+        ],
+        kinds: {
+          landing: { label: 'Extra landing', ch: 1.5, per: 'extra landing', sec: '4.W.1.a, 25.S.2.a', payLog: 'untilAuto', what: 'More landings operated than the trip had when it was awarded. Diversions for weather or maintenance, standby, sweep flights and extra duty periods do not count.' },
+          dutyPeriod: { label: 'Duty period disruption', ch: 1.5, per: 'duty period', sec: '4.W.1.b, 25.S.2.b', payLog: 'untilAuto', what: 'One layover became none, a deadhead at the start or end was deleted, or a standby was added. Once per duty period.' },
+          dhDeletedIntl: { label: 'Deadhead deleted, end of an international trip', ch: 3, per: 'trip', sec: '4.W.1.b, 25.S.2.b.ii', payLog: 'untilAuto', what: 'The deadhead home at the end of an international trip was changed to operate.' },
+          layover: { label: 'Layover change', tiers: [1, 1.5, 3], per: 'change on the trip', sec: '4.W.1.c, 25.S.2.c', payLog: 'untilAuto', what: 'A layover moved to a different city or was cancelled. One change 1:00, two 1:30, three or more 3:00, per trip.' },
+          crew: { label: 'Crew designation changed', ch: 1.5, per: 'flight', sec: '4.W.1.d, 25.S.2.d', payLog: 'unsaid', what: 'Awarded as Standard Crew and operated as Relief Pilot, or the other way. Not when the crew agrees to swap.' },
+          outAndBack: { label: 'Out-and-back to a different outstation', ch: 1.5, per: 'trip', sec: '4.W.1.e, 25.S.2.e', payLog: 'unsaid', what: 'Still an out-and-back, but not to the airport it was awarded with.' },
+          singleLayover: { label: 'Single layover at a different airport', ch: 3, per: 'trip', sec: '4.W.1.f, 25.S.2.f', payLog: 'unsaid', what: 'A domestic trip with one layover that laid over somewhere else.' },
+          dayToCritical: { label: 'Day trip moved into the critical period', ch: 1.5, per: 'trip', sec: '4.W.1.g, 25.S.2.g', payLog: 'untilAuto', what: 'A domestic trip awarded mostly as day duty that operated mostly touching the critical period.' },
+          extraDutyPeriod: { label: 'Extra duty period', ch: 3.5, per: 'extra duty period', rate: 'normal', sec: '4.Y.1', payLog: 'unsaid', logNote: 'On PRO, PNP, SMU and R-24 reserve trips it is paid by pay log until the December 2026 bid period.', what: 'More duty periods operated than the trip had when it was awarded. No 4.W disruption pays in that duty period.' },
+          farExtension: { label: 'FAR extension', ch: 3, per: 'duty period', rate: 'normal', sec: '4.X, 25.T', payLog: 'unsaid', what: 'A duty period extended beyond the operational limits.' },
+          recall: { label: 'Recall from rest', ch: 3, per: 'recall', rate: 'normal', sec: '4.Z', payLog: 'unsaid', what: 'A legal rest period was interrupted.' },
+          baseReplacement: { label: 'Base replacement trip', ch: 3, per: 'trip', rate: 'normal', sec: '4.AA.3', payLog: 'unsaid', what: 'You blocked out on a base replacement trip.' },
+          weatherReplacement: { label: 'Weather replacement (Captain)', ch: 2.5, per: 'time', sec: '4.CC', payLog: 'unsaid', what: 'A Captain away from base pulled off a trip to replace a weather restricted Captain.' },
+          criticalStop: { label: 'Critical period: 2 to 4 hour stop', ch: 1.5, per: 'stop', sec: '4.GG.2', payLog: 'unsaid', what: 'After flight deck duty in the critical period, an intermediate stop over 2 and under 4 hours, away from the hubs listed in 4.GG.2. Not on an out-and-back.' },
+          criticalLanding: { label: 'Critical period: landing over 2', ch: 1.5, per: 'landing over 2', sec: '4.GG.3', payLog: 'unsaid', what: 'A duty period that begins in the critical period: each landing past the second.' },
+          criticalOutBack: { label: 'Critical period: out-and-back in after 10:15', ch: 1.5, per: 'duty period', sec: '4.GG.4', payLog: 'unsaid', what: 'A duty period that begins in the critical period, leaves base and returns, and blocks in after 10:15 local base time.' },
+          criticalLong: { label: 'Critical period: flight after one over 4:30', ch: 3, per: 'later flight', sec: '4.GG.5', payLog: 'unsaid', what: 'A flight deck duty period in the critical period with a flight over 4:30 block: each flight after it.' },
+          intermediateStop: { label: 'Intermediate stop pay', ch: 1.5, per: 'later flight', sec: '4.HH.2', payLog: 'unsaid', what: 'Outside the critical period: a flight over 4:30 block and a stop over 2 and under 4 hours. Each flight after that stop.' },
+          taxi: { label: 'Taxi or ground operation during a trip', ch: 1, per: 'time', sec: '4.U.2', payLog: 'always', what: 'Aircraft ground operations for a purpose other than flight, during a trip or base standby.' },
+          taxiAlone: { label: 'Taxi or ground operation, not on a trip', ch: 3, per: 'time', sec: '4.U.1', payLog: 'unsaid', what: '3 CH or duty rig, whichever is greater. Type a larger figure as other pay if duty rig was more.' },
+          rpChange: { label: 'Reserve period changed', ch: 1.5, per: 'change', sec: '25.M.3.d.vii', payLog: 'unsaid', what: 'Your RP was changed under 25.M.3.d. Paid on top of RLG.' },
+          rDayMoved: { label: 'R-day moved to finish an assignment', ch: 3, per: 'time', sec: '25.M.6.h', payLog: 'unsaid', what: 'An R-day was moved from a later block to finish a reserve assignment. Paid on top of RLG.' },
+        },
+      },
+      source: 'Sec. 4.U, 4.W to 4.AA, 4.CC, 4.GG, 4.HH, 25.M, 25.S; Implementation LOA Appendix A',
+      verified: true,
+      note: 'Paid in addition to all other pay for the trip. 4.W pays apply to trips held as TRP, SON, SWP, SMU, M/U, MUV, MUD, MUS, PDO, PNP, AFB, PRO, RSV (R-24) and CIA, and you must operate the disruption. Pay logs: Appendix A of the Implementation LOA lists the new 4.W triggers as "pay log submission" until the company automates them, due by the first day of the December 2026 bid period. 4.U.2 taxi pay is always by pay log',
+    },
+  ],
+
+  disruptionRate: [
+    {
+      effectiveFrom: 'JUL26',
+      value: 100,
+      source: 'Sec. 4.W, 4.CC, 4.GG, 4.HH, 4.U, 25.M read with 4.X to 4.AA',
+      verified: false,
+      note: '4.X, 4.Y, 4.Z and 4.AA.3 say "at the pilot\'s normal pay rate". The other paragraphs give credit hours without naming a rate. The app pays those at the normal rate too',
+    },
+  ],
+
   tripRig: [
     {
       effectiveFrom: 'JUL26',

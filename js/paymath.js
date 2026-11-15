@@ -5,7 +5,7 @@
 import {
   payCents, toCents, pctOf, ruleAt, parseHours, parseMoney,
   formatHours as H, formatMoney as $, periodMonth, isoDate, lastDayOfMonth,
-  shiftPeriod, periodFromISO,
+  shiftPeriod, periodFromISO, periodIndex, periodName,
 } from './core.js';
 
 /* ------------------------------------------------------------- year group and rate */
@@ -43,6 +43,7 @@ export function payContext(rules, profile, code) {
     osc: r('overrideScheduledCredit'), oscFloor: r('oscShortLegFloor'), credit: r('creditValues'),
     intlDef: r('internationalDefinition'), overageAch: r('overageFromAch'), role: r('bidPeriodOverride'), roleCheck: r('bidPeriodOverrideCheck'),
     payOnly: r('payOnlyLine'), dayOff: r('instructDayOffPct'),
+    disrupt: r('disruptionPay'), disruptRate: r('disruptionRate'),
   };
   const fleet = profile.fleet === 'NB' ? 'narrowbody' : 'widebody';
   const seat = profile.seat === 'CA' ? 'CA' : 'FO';
@@ -105,6 +106,7 @@ export const ROW_TYPES = {
   draft: { label: 'VLT / DRF / AVA trip', hint: '150% on top of guarantee (4.Q.1)', gpe: true },
   reserve: { label: 'Reserve CH above RLG', hint: 'R-day credit over RLG at 150%' },
   overage: { label: 'Overage', hint: 'More than 2 hrs into days off: first 12 CH 150%, rest 200%' },
+  disrupt: { label: 'Disruption pay', hint: 'Extra landing, layover change, extra duty period, recall from rest and the like (4.W to 4.Z)' },
   pmu: { label: 'PMU / SMU', hint: '125% (PMU up to your OTP eligibility, 4.N.3). General make-up (M/U) is 100%: add it as a trip', gpe: true },
   other: { label: 'Other pay at 100%', hint: 'Sim support, training, misc.', gpe: true },
   dayoff: { label: 'Day-off instruction (150%)', hint: 'R-day value per day at 150%: student contact or seat support on a day off (11.N.25.b.ii)' },
@@ -134,6 +136,28 @@ function overageItems(min, ctx, label = 'Overage') {
   return out;
 }
 
+// Does a disruption pay need a pay log? From the contract text only (rules.disruptionPay).
+//   need: 'yes' send one · 'auto' should now pay on its own · 'unsaid' the contract does not say
+export function payLogStatus(kindKey, ctx) {
+  const d = ctx.rule.disrupt.value;
+  const k = d.kinds[kindKey];
+  if (!k) return null;
+  const auto = periodIndex(ctx.code) >= periodIndex(d.autoFrom);
+  const from = periodName(d.autoFrom);
+  if (k.payLog === 'always') return { need: 'yes', text: `Paid only when you send a pay log (Sec. ${k.sec}).` };
+  if (k.payLog === 'untilAuto') {
+    return auto
+      ? { need: 'auto', text: `Due to pay on its own from the ${from} bid period (Implementation LOA, Appendix A). If it is missing from your check, send a pay log.` }
+      : { need: 'yes', text: `Send a pay log. This is paid by pay log until the ${from} bid period (Implementation LOA, Appendix A).` };
+  }
+  return { need: 'unsaid', text: `The contract does not say a pay log is needed.${k.logNote && !auto ? ` ${k.logNote}` : ''} Look for it on the 15th after this bid period.` };
+}
+
+// Pay logs still to send for one calculated bid period.
+export const payLogsDue = (calc) => calc.rows.flatMap((r) => r.items
+  .filter((i) => i.payLog?.need === 'yes' && !i.logSent)
+  .map((i) => ({ rowId: r.row.id, label: i.label, cents: i.cents })));
+
 export function calcRow(row, ctx) {
   const t = ROW_TYPES[row.type];
   if (!t) return { row, items: [], error: 'Unknown row type' };
@@ -153,6 +177,19 @@ export function calcRow(row, ctx) {
     case 'overage': {
       const min = parseHours(row.hours);
       res = min == null || min <= 0 ? { items: [], error: 'Enter overage credit hours' } : { items: overageItems(min, ctx) };
+      break;
+    }
+    case 'disrupt': {
+      const k = ctx.rule.disrupt.value.kinds[row.kind];
+      const n = Math.max(0, Math.round(Number(row.count) || 0));
+      if (!k) { res = { items: [], error: 'Pick the disruption' }; break; }
+      if (!n) { res = { items: [], error: `Enter how many (${k.per})` }; break; }
+      const min = Math.round((k.tiers ? k.tiers[Math.min(n, k.tiers.length) - 1] : n * k.ch) * 60);
+      const how = k.tiers ? `${n} ${n === 1 ? 'change' : 'changes'} on the trip = ${H(min)} CH` : `${n} × ${H(Math.round(k.ch * 60))} CH`;
+      const label = row.label?.trim() ? `${k.label}: ${row.label.trim()}` : k.label;
+      res = { items: [item('onTop', label, `${how} × ${$(ctx.rateCents)}`, payCents(min, ctx.rateCents, ctx.rule.disruptRate.value),
+        [ctx.rule.rates, ctx.rule.disrupt, k.rate === 'normal' ? null : ctx.rule.disruptRate],
+        { paidMin: min, disrupt: row.kind, sec: k.sec, payLog: payLogStatus(row.kind, ctx), logSent: !!row.logSent })] };
       break;
     }
     case 'override':
@@ -394,6 +431,21 @@ export function calcTrip(trip, ctx) {
   }
 
   return summarize({ trip, items, notes, bkoMin: bko.min, schedMin: sched, bkoPending: !!bko.pending, oscMin: bko.fromOsc ?? null, achMin: bko.ach ?? null, autoOverageMin: autoOvg, overageMin: ovg });
+}
+
+// What one trip is worth if you pick it up: what it adds on top of guarantee, the rough take-home
+// of that, and the take-home per hour and per day away from base.
+//   as: 'draft' (VLT/DRF/AVA 150%), 'pmu' (125%) or 'makeup' (100%, paid on top)
+export function tripWorth(trip, ctx, profile, as = 'draft') {
+  const makeUp = as === 'makeup';
+  const c = calcTrip({ ...trip, assign: makeUp ? 'line' : as }, makeUp ? { ...ctx, payOnly: true } : ctx);
+  const net = estimateNet(c.totalCents, c.perDiemCents, profile, ctx, c.paidMin, { which: 'mid', marginal: true });
+  const awayMin = parseHours(trip.away) || 0;
+  return {
+    as, calc: c, grossCents: c.totalCents, payCents: c.onTopCents, perDiemCents: c.perDiemCents, net, awayMin, schedMin: c.schedMin,
+    perAwayHourCents: awayMin > 0 ? Math.round((net.netCents * 60) / awayMin) : null,
+    perDayCents: awayMin > 0 ? Math.round((net.netCents * 1440) / awayMin) : null,
+  };
 }
 
 function summarize(res) {

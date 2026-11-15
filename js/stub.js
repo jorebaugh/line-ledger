@@ -163,6 +163,9 @@ export function summarizeStub(st) {
     company: pair(company),
     match: pair(match),
     other: { cur: sum(other, 'cur'), lines: other.filter((d) => d.cur).map((d) => ({ label: d.label.replace(/^[&@\s]+/, ''), cur: d.cur })) },
+    // Earnings lines paid on this check, for the line-by-line check: pay code, amount, and the units
+    // (hours, in hundredths) when the stub prints them. Pay codes only: nothing personal is on these lines.
+    earn: st.earnings.filter((e) => e.cur).map((e) => ({ label: e.label.replace(/^[&@\s]+/, ''), cur: e.cur, units: e.units ?? null })),
     rates: {
       taxCur: pct(st.taxes?.cur || 0, pay.cur),
       taxYtd: pct(st.taxes?.ytd || 0, pay.ytd),
