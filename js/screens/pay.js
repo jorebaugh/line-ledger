@@ -62,7 +62,7 @@ function tilesHTML(x, v) {
 function whatIfHTML(x, v, app) {
   const min = v.cur.whatIf || 0;
   if (!min) return `<div class="wi-amt">$0.00</div><p class="muted small">Slide or type draft hours at 150% and watch the ${formatDate(v.checks.next.date)} check move.</p>`;
-  const n = estimateNet(v.c.whatIfCents, 0, app.state.profile, v.ctx, min);
+  const n = estimateNet(v.c.whatIfCents, 0, app.state.profile, v.ctx, min, { which: 'mid', marginal: true }); // lands on a 15th; flat deductions come off either way
   return `
     <div class="wi-amt">${x.money(v.c.whatIfCents, entryExplain(v.c.whatIf, 'What-if draft'), { sign: true, cls: 'num' })} <small>gross</small></div>
     <p class="wi-sub">≈ ${x.money(n.netCents, netExplain(n, v.c.whatIfCents, 0, 'What-if draft, est. net', v.ctx), { sign: true, mark: false })} net · lands on ${formatDate(v.checks.next.date, { year: true })}</p>`;

@@ -555,7 +555,7 @@ export const RULES = {
       value: { startPerCH: 1.0, startYear: 2015, stepPerCH: 0.05 },
       source: 'Sec. 27.I.3 Premium Reimbursement Plan (PRP/VEBA)',
       verified: true,
-      note: 'Pay table rates are book rates. Cash pay is reduced by $1.00 per paid credit hour (from Nov 2, 2015), plus $0.05 on the first day of each November bid period after that: $1.55 from Nov 2026. Shown here as a deduction; how it appears on your stub: confirm',
+      note: 'Pay table rates are book rates. Cash pay is reduced by $1.00 per paid credit hour (from Nov 2, 2015), plus $0.05 on the first day of each November bid period after that: $1.55 from Nov 2026. On the stub it is one deduction ("Post65 PRP") on the 15th check only: every credit hour paid for the bid period before, at that period\'s rate. That timing comes from a pilot\'s October and November 2026 stubs, where it matches to the cent; the contract text does not say which check.',
     },
   ],
 

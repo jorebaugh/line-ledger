@@ -31,6 +31,10 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
 - 401(k): year to date from a pasted pay stub (or typed, or estimated), projected check by check to
   December 31 against the employee, total additions and compensation limits, with the after-tax % that
   lands on the limit. A pasted stub can also set withholding, other deductions and elections.
+- Take-home by check: the 15th and the end-of-month check keep their own withholding percentage and other
+  deductions (`withholding`/`otherDed` and `withholdingEnd`/`otherDedEnd`; a blank one borrows the other's).
+  A stub fills in the check it belongs to, by its pay period. Retiree health (PRP/VEBA) comes off the 15th
+  only, on every credit hour paid for the bid period before, at that period's rate.
 - Deviation and Hotel banks: deadheads and expenses per bid period, carry and expiry by the rule in effect,
   caps, overspend handling, paste of the company Deviation Bank Allocation screen with a side-by-side
   comparison, hotel bank with the company's three numbers for comparison.
@@ -39,8 +43,8 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
   interest, the rate used to value the pension, how long it pays and IRS limit growth. Shows the pension a year,
   its lump-sum value, account balances, the difference from staying, and company money paid as cash over the
   IRS caps. Section 28 and the MBCBP/Enhanced PRSP Benefit Implementation LOA; key dates and countdown.
-- Settings: edit answers, add a pay stub (PDF or pasted text) or type withholding, other deductions and
-  401(k) elections, keep or remove saved stubs, install on the home screen, export and import JSON, reset.
+- Settings: edit answers, add a pay stub (PDF or pasted text) or type each check's withholding and other
+  deductions and your 401(k) elections, keep or remove saved stubs, install on the home screen, export and import JSON, reset.
 - Pay stub PDFs are read on the phone with no library (`js/pdftext.js`): standard-font statements with plain or
   compressed page text. The text goes through the same stub reader as a paste.
 - "Would you use this?" on Home and at the bottom of Pay: three questions, sent only when the user taps Send.

@@ -17,6 +17,24 @@ const TOTALS = {
 const TAX = /withhold|med\/ee|oasdi|addl med|medicare|fica|state|\bsit\b|\bsdi\b|local|city/i;
 const SECTION = /^(Earns-Category|Check Summary|Taxes\b|Deductions\b|Txbl Benefits|ER Paid Benefits|Other Information|For Legal)/i;
 
+// The month's two checks take different deductions, so a stub belongs to one or the other:
+// the 15th ('mid', pay period ending the 15th) or the last day ('end').
+export const CHECK_NAME = { mid: '15th', end: 'end-of-month' };
+export const CHECK_A = { mid: 'a 15th', end: 'an end-of-month' };
+export function stubWhich(s) {
+  const day = Number(String(s?.periodTo || s?.adviceDate || '').slice(8, 10));
+  return day > 20 ? 'end' : 'mid';
+}
+// The profile fields each check's stub fills in.
+export const CHECK_KEYS = { mid: { wh: 'withholding', other: 'otherDed' }, end: { wh: 'withholdingEnd', other: 'otherDedEnd' } };
+// Copy a stub summary's withholding and other deductions onto the check it belongs to.
+export function applyStub(profile, s, { wh = true, other = true, whPct } = {}) {
+  const k = CHECK_KEYS[stubWhich(s)];
+  const pct = whPct ?? s.rates.taxCur;
+  if (wh && pct != null) profile[k.wh] = String(pct);
+  if (other) profile[k.other] = (s.other.cur / 100).toFixed(2);
+}
+
 const toISO = (mdy) => {
   const m = mdy.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (!m) return null;

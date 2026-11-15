@@ -511,22 +511,25 @@ export function checkDates(code) {
 //   15th     = half of BLG/RLG + last period's extras (credits above guarantee, per diem, adjustments)
 //   last day = the other half of BLG/RLG
 // This period's extras land on next month's 15th.
+// Retiree health (PRP/VEBA, 27.I.3) comes off the 15th only, on every credit hour paid for the bid
+// period before it: vebaMin. With no previous period entered, this period's guarantee stands in.
 // nextG (optional): { cents, minutes } of NEXT period's guarantee, so the next 15th can show in full.
 export function calcChecks(cur, prev, nextG = null) {
   const dates = checkDates(cur.code);
   const half = Math.floor(cur.guarantee.cents / 2);
   const prevExtras = prev ? prev.extrasCents : 0;
   const prevPerDiem = prev ? prev.perDiemCents : 0;
-  const halfMin = cur.guarantee.minutes / 2;
   const nextHalf = nextG ? Math.floor(nextG.cents / 2) : 0;
+  const paidCH = (p) => p.guarantee.minutes + p.paidExtraMin;
   return {
-    mid: { date: dates.mid, grossCents: half + prevExtras, halfCents: half, prevExtrasCents: prevExtras, perDiemCents: prevPerDiem, hasPrev: !!prev, paidMin: halfMin + (prev ? prev.paidExtraMin : 0) },
-    end: { date: dates.end, grossCents: cur.guarantee.cents - half, halfCents: cur.guarantee.cents - half, perDiemCents: 0, paidMin: halfMin },
+    mid: { date: dates.mid, grossCents: half + prevExtras, halfCents: half, prevExtrasCents: prevExtras, perDiemCents: prevPerDiem, hasPrev: !!prev, vebaMin: prev ? paidCH(prev) : cur.guarantee.minutes, vebaAssumed: !prev },
+    end: { date: dates.end, grossCents: cur.guarantee.cents - half, halfCents: cur.guarantee.cents - half, perDiemCents: 0, vebaMin: 0 },
     next: {
       date: dates.next, extrasCents: cur.extrasCents, perDiemCents: cur.perDiemCents,
       full: !!nextG, halfCents: nextHalf, nextGMinutes: nextG ? nextG.minutes : 0,
       grossCents: nextHalf + cur.extrasCents,
-      paidMin: cur.paidExtraMin + (nextG ? nextG.minutes / 2 : 0),
+      // Shown in full: the whole period's hours. Shown as extras only: just the extra hours.
+      vebaMin: nextG ? paidCH(cur) : cur.paidExtraMin,
     },
   };
 }
@@ -540,21 +543,42 @@ export function nextCheck(todayIso) {
 
 /* ---------------------------------------------------------------------- net */
 
+// The month's two checks don't take the same deductions, so each keeps its own withholding
+// percentage and its own "other deductions": withholding / otherDed for the 15th ('mid'),
+// withholdingEnd / otherDedEnd for the last day ('end'). A blank one borrows the other check's figure.
+export function checkDeductions(profile = {}, which = 'mid', defaultWhPct = 30) {
+  const set = (v) => v != null && String(v).trim() !== '';
+  const end = which === 'end';
+  const [wh, whAlt] = end ? [profile.withholdingEnd, profile.withholding] : [profile.withholding, profile.withholdingEnd];
+  const [od, odAlt] = end ? [profile.otherDedEnd, profile.otherDed] : [profile.otherDed, profile.otherDedEnd];
+  const whUse = set(wh) ? wh : set(whAlt) ? whAlt : null;
+  const odUse = set(od) ? od : set(odAlt) ? odAlt : null;
+  return {
+    whPct: whUse == null ? defaultWhPct : Number(whUse),
+    whAssumed: whUse == null,
+    otherCents: odUse == null ? 0 : Math.max(0, parseMoney(odUse) || 0),
+    borrowed: (!set(wh) && set(whAlt)) || (!set(od) && set(odAlt)),
+  };
+}
+
 // Rough net: arithmetic on the user's own percentages. Not a tax engine.
-// paidMin: credit hours paid in this check, for the VEBA deduction (27.I.3).
-export function estimateNet(grossCents, perDiemCents, profile, ctx, paidMin = 0) {
+// vebaMin: the credit hours the retiree-health deduction (27.I.3) is taken on in this check.
+// which: 'mid' (the 15th) or 'end' (the last day), for that check's own withholding and deductions.
+// vebaCents: the per-hour rate when it belongs to another bid period (the 15th carries the one before).
+// marginal: what one more trip adds, so the flat per-check deductions are left out.
+export function estimateNet(grossCents, perDiemCents, profile, ctx, vebaMin = 0, { which = 'mid', vebaCents = ctx.vebaCents, marginal = false } = {}) {
   const a = ctx.rule.assumptions.value;
   const base = Math.max(0, a.perDiemInPayBase ? grossCents : grossCents - perDiemCents);
   const kPct = (Number(profile.pretax) || 0) + (Number(profile.roth) || 0) + (Number(profile.aftertax) || 0);
-  const whAssumed = profile.withholding == null || profile.withholding === '';
-  const whPct = whAssumed ? a.defaultWithholdingPct : Number(profile.withholding);
+  const d = checkDeductions(profile, which, a.defaultWithholdingPct);
+  const { whPct, whAssumed } = d;
   const duesPct = ctx.rule.dues.value.pct;
   const k401 = pctOf(base, kPct);
   const dues = pctOf(base, duesPct);
   const tax = pctOf(base, whPct);
-  const veba = payCents(Math.max(0, paidMin), ctx.vebaCents, 100);
-  const other = grossCents > 0 ? Math.max(0, parseMoney(profile.otherDed) || 0) : 0;
-  return { netCents: grossCents - k401 - dues - tax - veba - other, baseCents: base, k401, dues, tax, veba, other, paidMin, kPct, whPct, duesPct, whAssumed };
+  const veba = payCents(Math.max(0, vebaMin), vebaCents, 100);
+  const other = grossCents > 0 && !marginal ? d.otherCents : 0;
+  return { netCents: grossCents - k401 - dues - tax - veba - other, baseCents: base, k401, dues, tax, veba, other, vebaMin, vebaCents, which, borrowed: d.borrowed, kPct, whPct, duesPct, whAssumed };
 }
 
 /* -------------------------------------------------------------------- audit */

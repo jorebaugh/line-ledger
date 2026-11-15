@@ -2,7 +2,7 @@
 // addresses, employee numbers and account numbers are never read or saved (see js/stub.js).
 
 import { formatMoney as $, formatDate, parseMoney } from '../core.js';
-import { parseStub, summarizeStub } from '../stub.js';
+import { parseStub, summarizeStub, stubWhich, applyStub, CHECK_NAME, CHECK_A, CHECK_KEYS } from '../stub.js';
 import { pdfText } from '../pdftext.js';
 import { esc, openSheet, toast } from '../ui.js';
 
@@ -10,7 +10,7 @@ export function stubSummaryHTML(s) {
   const pct = (n) => (n == null ? '—' : `${n}%`);
   return `
     <ul class="ledger">
-      <li><span>Check</span><span>${formatDate(s.adviceDate, { year: true })}${s.periodFrom ? ` · ${formatDate(s.periodFrom)}–${formatDate(s.periodTo)}` : ''}</span></li>
+      <li><span>Check</span><span>${formatDate(s.adviceDate, { year: true })} · ${CHECK_NAME[stubWhich(s)]}</span></li>
       <li><span>Gross</span><span class="num">${$(s.gross?.cur || 0)}</span></li>
       <li><span>Per diem (not taxed)</span><span class="num">${$(s.perDiem.cur)}</span></li>
       <li><span>Taxes</span><span class="num">${$(s.taxes?.cur || 0)} · ${pct(s.rates.taxCur)} of pay</span></li>
@@ -61,16 +61,21 @@ export function openStubSheet(app) {
       if (!st.ok) { s = null; pv.innerHTML = `<p class="note small">No pay lines found in ${esc(from)}. ${from === 'the paste' ? 'Paste the whole statement.' : 'Try pasting the text instead.'}</p>`; return; }
       s = summarizeStub(st);
       const p = app.state.profile;
+      const w = stubWhich(s);
+      const k = CHECK_KEYS[w];
+      const o = w === 'mid' ? 'end' : 'mid';
+      const hasOther = (app.state.stubs || []).some((x) => stubWhich(x) === o);
       pv.innerHTML = `
         <div class="recap-card">
           ${stubSummaryHTML(s)}
-          <b class="mt block">Also use it for your estimates</b>
+          <b class="mt block">Use it for your ${CHECK_NAME[w]} checks</b>
+          <p class="hint">Your two checks take different deductions. This stub sets the ${CHECK_NAME[w]} one${hasOther ? '' : `; add ${CHECK_A[o]} stub next for the other`}.</p>
           ${s.rates.taxCur != null ? `<label class="check"><input type="checkbox" data-use="wh" checked><span>Withholding: <select data-wh>
             <option value="${s.rates.taxCur}">${s.rates.taxCur}% (this check)</option>
             ${s.rates.taxYtd != null ? `<option value="${s.rates.taxYtd}">${s.rates.taxYtd}% (year to date)</option>` : ''}
-          </select> <small>now ${esc(p.withholding || 'assumed 30')}%</small></span></label>` : ''}
-          <label class="check"><input type="checkbox" data-use="other" checked><span>Other deductions per check: ${$(s.other.cur)} <small>now ${p.otherDed ? $(parseMoney(p.otherDed)) : 'none'}</small></span></label>
-          <label class="check"><input type="checkbox" data-use="elections" checked><span>401(k) elections: ${s.rates.pretax ?? 0}% pre-tax, ${s.rates.roth ?? 0}% Roth, ${s.rates.after ?? 0}% after-tax <small>now ${esc(p.pretax || '0')} / ${esc(p.roth || '0')} / ${esc(p.aftertax || '0')}</small></span></label>
+          </select> <small>now ${esc(p[k.wh] || 'not set')}${p[k.wh] ? '%' : ''}</small></span></label>` : ''}
+          <label class="check"><input type="checkbox" data-use="other" checked><span>Other deductions: ${$(s.other.cur)} <small>now ${p[k.other] ? $(parseMoney(p[k.other])) : 'not set'}</small></span></label>
+          <label class="check"><input type="checkbox" data-use="elections" checked><span>401(k) elections, both checks: ${s.rates.pretax ?? 0}% pre-tax, ${s.rates.roth ?? 0}% Roth, ${s.rates.after ?? 0}% after-tax <small>now ${esc(p.pretax || '0')} / ${esc(p.roth || '0')} / ${esc(p.aftertax || '0')}</small></span></label>
           <p class="hint">The elections are read off this check, so they come out as rough percentages. Fix them below if your election is a round number.</p>
           <button type="button" class="btn primary big mt" data-save-stub>Save stub</button>
         </div>`;
@@ -80,17 +85,19 @@ export function openStubSheet(app) {
       const st = app.state;
       st.stubs = [...(st.stubs || []).filter((x) => x.adviceDate !== s.adviceDate), s].sort((a, b) => (a.adviceDate < b.adviceDate ? -1 : 1)).slice(-6);
       const use = (k) => pv.querySelector(`[data-use="${k}"]`)?.checked;
-      if (use('wh')) st.profile.withholding = String(pv.querySelector('[data-wh]').value);
-      if (use('other')) st.profile.otherDed = (s.other.cur / 100).toFixed(2);
+      applyStub(st.profile, s, { wh: !!use('wh'), other: !!use('other'), whPct: pv.querySelector('[data-wh]')?.value });
       if (use('elections')) {
         const r = (n) => (n ? String(Math.round(n * 10) / 10) : '');
         st.profile.pretax = r(s.rates.pretax);
         st.profile.roth = r(s.rates.roth);
         st.profile.aftertax = r(s.rates.after);
       }
+      const w = stubWhich(s);
+      const o = w === 'mid' ? 'end' : 'mid';
+      const needOther = !st.stubs.some((x) => stubWhich(x) === o);
       close();
       app.save();
-      toast(`Saved the ${formatDate(s.adviceDate)} stub`);
+      toast(needOther ? `Saved your ${CHECK_NAME[w]} check. Now add ${CHECK_A[o]} stub.` : `Saved the ${formatDate(s.adviceDate)} stub`);
       app.render({ keepScroll: true });
     });
   });

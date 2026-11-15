@@ -4,6 +4,7 @@
 import { RULES } from '../rules.js';
 import { shiftPeriod, periodName, formatDate, formatHours as H, formatMoney as $, periodMonth, parseHours, payCents } from './core.js';
 import { payContext, calcPeriod, calcChecks, estimateNet, ASSIGNMENTS, ROW_TYPES, seatName, fleetName } from './paymath.js';
+import { CHECK_NAME, CHECK_A } from './stub.js';
 import { ensurePeriod } from './store.js';
 
 // Compute one bid period and the period before it (whose extras pay on this period's 15th).
@@ -25,10 +26,11 @@ export function periodView(state, code, { create = true, whatIf = true } = {}) {
 
   const checks = calcChecks(c, p, nextG);
   const profile = state.profile;
+  // The 15th takes retiree health for the bid period before it, at that period's rate.
   const net = {
-    mid: estimateNet(checks.mid.grossCents, checks.mid.perDiemCents, profile, ctx, checks.mid.paidMin),
-    end: estimateNet(checks.end.grossCents, 0, profile, ctx, checks.end.paidMin),
-    next: estimateNet(checks.next.grossCents, checks.next.perDiemCents, profile, ctx, checks.next.paidMin),
+    mid: { ...estimateNet(checks.mid.grossCents, checks.mid.perDiemCents, profile, ctx, checks.mid.vebaMin, { which: 'mid', vebaCents: (pctx || ctx).vebaCents }), vebaFor: periodName(prevCode), vebaAssumed: checks.mid.vebaAssumed },
+    end: estimateNet(checks.end.grossCents, 0, profile, ctx, 0, { which: 'end' }),
+    next: { ...estimateNet(checks.next.grossCents, checks.next.perDiemCents, profile, ctx, checks.next.vebaMin, { which: 'mid' }), vebaFor: periodName(code) },
   };
   return { code, prevCode, nextCode, cur, prevP, ctx, pctx, c, p, nextG, checks, net };
 }
@@ -143,16 +145,20 @@ export function netExplain(n, grossCents, perDiemCents, title, ctx) {
     { label: '401(k) elections', text: `${n.kPct}% × ${$(n.baseCents)}`, cents: -n.k401 },
     { label: 'Union dues', text: `${n.duesPct}% × ${$(n.baseCents)}`, cents: -n.dues },
     { label: `Withholding${n.whAssumed ? ' (assumed)' : ''}`, text: `${n.whPct}% × ${$(n.baseCents)}`, cents: -n.tax },
-    ...(n.veba ? [{ label: 'VEBA (retiree health)', text: `${H(n.paidMin)} paid CH × ${$(ctx.vebaCents)}`, cents: -n.veba, sources: [ctx.rule.veba] }] : []),
-    ...(n.other ? [{ label: 'Other deductions', text: 'Insurance, medical and the like, per check from your profile', cents: -n.other }] : []),
+    ...(n.veba ? [{ label: 'Retiree health (PRP/VEBA)', text: `${H(n.vebaMin)} CH paid${n.vebaFor ? ` for ${n.vebaFor}` : ''} × ${$(n.vebaCents)}`, cents: -n.veba, sources: [ctx.rule.veba] }] : []),
+    ...(n.other ? [{ label: 'Other deductions', text: `Insurance, medical and the like on ${CHECK_NAME[n.which]} checks, from Settings`, cents: -n.other }] : []),
   ];
+  const other = n.which === 'end' ? 'mid' : 'end';
   return {
     title,
     lines,
     total: { label: 'Est. net (rough)', cents: n.netCents },
     notes: [
       'Rough on purpose: your own withholding percentage, not a tax calculation. Elections stop when you hit an annual limit, which this ignores.',
-      ...(n.whAssumed ? ['Withholding is assumed. Set yours in Settings › Make it more accurate.'] : []),
+      ...(n.whAssumed ? ['Withholding is assumed. Set yours in Settings › Taxes and deductions.'] : []),
+      ...(n.borrowed ? [`No ${CHECK_NAME[n.which]} figures yet, so this uses your ${CHECK_NAME[other]} check's. The two checks differ: add ${CHECK_A[n.which]} stub in Settings › Taxes and deductions.`] : []),
+      ...(n.which === 'end' ? ['Retiree health (PRP/VEBA) is not taken from this check. It comes off the 15th, for the whole bid period before.'] : []),
+      ...(n.vebaAssumed ? ['Last bid period is not entered, so retiree health uses this period\'s guarantee hours.'] : []),
     ],
     sources: [ctx.rule.dues, ctx.rule.assumptions],
   };
