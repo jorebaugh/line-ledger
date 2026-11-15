@@ -1,6 +1,6 @@
 {
-  "name": "Line Ledger",
-  "short_name": "Line Ledger",
+  "name": "Crewport Pay",
+  "short_name": "Crewport Pay",
   "description": "Pay estimator preview for pilots. Runs on your phone; nothing is sent anywhere.",
   "id": "./",
   "start_url": "./#/home",

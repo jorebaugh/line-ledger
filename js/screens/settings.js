@@ -76,7 +76,7 @@ export default {
       ${fold('deductions', 'Taxes and deductions', esc(dedSummary(app.state.profile || {})), deductionsHTML(app.state))}
       ${fold('install', 'Put it on your phone', inst === 'installed' ? 'Installed' : 'Add it to your home screen', `
         <p>${INSTALL_HELP[inst]}</p>
-        ${inst === 'prompt' ? '<button type="button" class="btn primary wide" data-act="install">Install Line Ledger</button>' : ''}`)}
+        ${inst === 'prompt' ? '<button type="button" class="btn primary wide" data-act="install">Install Crewport Pay</button>' : ''}`)}
       ${fold('data', 'Your data', 'Back up, move to a new phone, or start over', `
         <p class="muted small">Everything you enter is stored only in this browser on this device. Nothing is sent anywhere. Export a copy to move it to a new phone or keep a backup.</p>
         <div class="stack">
@@ -86,7 +86,7 @@ export default {
           <button type="button" class="btn danger" data-act="reset">Reset all data</button>
         </div>`)}
       ${fold('about', 'About', `Version ${esc(APP_VERSION)}`, `
-        <p class="small">Line Ledger is a preview. Contract figures come from one rules file, each with its section reference. Anything marked <span class="confirm">confirm</span> hasn't been checked against its source yet.</p>`)}`;
+        <p class="small">Crewport Pay is a preview. Contract figures come from one rules file, each with its section reference. Anything marked <span class="confirm">confirm</span> hasn't been checked against its source yet.</p>`)}`;
   },
   mount(el, app) {
     const form = el.querySelector('#profile');
@@ -141,7 +141,7 @@ export default {
         t.value = '';
         if (!f) return;
         const next = parseImport(await f.text());
-        if (!next) { toast("That file isn't a Line Ledger export"); return; }
+        if (!next) { toast("That file isn't a Crewport Pay export"); return; }
         confirmSheet('Replace what\'s on this device?', 'The imported copy replaces everything entered here. Export first if you want to keep this device\'s data.', 'Replace with the import', () => {
           app.state = next;
           app.save();

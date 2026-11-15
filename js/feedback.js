@@ -1,7 +1,7 @@
 // Feedback works like the Mint schedule page: a link that opens an email to the developer, pre-filled
 // with boxes to tick. Nothing from the app goes with it, only the app version and which screen it came from.
 
-export const FEEDBACK_SUBJECT = 'Line Ledger feedback';
+export const FEEDBACK_SUBJECT = 'Crewport Pay feedback';
 
 export const FEEDBACK_TEMPLATE = [
   'Tick whatever applies (or ignore this and freestyle):',
@@ -21,7 +21,7 @@ export const FEEDBACK_TEMPLATE = [
 ];
 
 export function feedbackBody(version, where) {
-  return [...FEEDBACK_TEMPLATE, `(Line Ledger ${version}${where ? `, from ${where}` : ''})`].join('\n');
+  return [...FEEDBACK_TEMPLATE, `(Crewport Pay ${version}${where ? `, from ${where}` : ''})`].join('\n');
 }
 
 // The address goes in as-is (some mail apps don't decode %40); subject and body are encoded.

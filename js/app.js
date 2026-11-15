@@ -58,7 +58,7 @@ function render({ keepScroll = false } = {}) {
     </nav>`;
   root.innerHTML = `
     <header class="topbar">
-      <a class="brand" href="#/home"><span class="logo" aria-hidden="true">LL</span><span>Line Ledger</span></a>
+      <a class="brand" href="#/home"><img class="logo" src="icons/icon-192.png" alt="" width="32" height="32"><span>Crewport Pay</span></a>
       ${app.state.sample ? '<span class="pill pill-sample">Sample data</span>' : ''}
       ${route === 'intake' ? '' : `<a class="icon-btn" href="#/settings" aria-label="Settings">${ICON.settings}</a>`}
     </header>
@@ -66,7 +66,7 @@ function render({ keepScroll = false } = {}) {
     <footer class="disclaimer">${FOOTER}<br><a class="foot-link" href="${feedbackHref(`${screen.title} screen`)}">Send feedback</a></footer>
     ${tabs}`;
   document.body.classList.toggle('has-tabs', route !== 'intake');
-  document.title = `${screen.title} · Line Ledger`;
+  document.title = `${screen.title} · Crewport Pay`;
   if (screen.mount) screen.mount(root.querySelector('#screen'), app);
   if (keepScroll) window.scrollTo(0, y);
   else if (route !== lastRoute || !keepScroll) window.scrollTo(0, 0);

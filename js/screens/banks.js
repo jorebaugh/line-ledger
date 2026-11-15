@@ -25,6 +25,13 @@ export function bankSnapshot(state, code) {
 
 const viewCode = (dev) => dev.viewCode || periodFromISO(todayISO());
 
+const openFolds = new Set(); // folded sections the user opened
+const fold = (key, title, sub, body, forceOpen = false) => `
+  <details class="card fold" data-fold="${key}" ${forceOpen || openFolds.has(key) ? 'open' : ''}>
+    <summary><span class="act-t"><b>${title}</b><small class="muted">${sub}</small></span>${ICON.chevron}</summary>
+    <div class="fold-body">${body}</div>
+  </details>`;
+
 /* ------------------------------------------------------------- deviation */
 
 function balanceLine(b) {
@@ -77,6 +84,10 @@ function deviationTab(app, dev, code, sim) {
   const carriedEx = ex('Carried in', (rec?.carriedIn || []).map((b) => ({ label: `From ${b.fromCode}`, text: b.kind === 'legacy' ? `÷ ${b.divisor}` : `usable through ${b.lastUsable}`, cents: b.valueCents })), { label: 'Carried in', cents: carried });
   const spentEx = ex('Spent', exps.map((e) => ({ label: e.desc || catName(e.category), text: catName(e.category) + (capOf(e.id) ? `, capped at ${$(capOf(e.id).capCents)}` : ''), cents: capOf(e.id)?.allowedCents ?? (parseMoney(e.amount) || 0) })), { label: 'Spent', cents: spent });
   const remEx = ex('Remaining', (rec?.balances || []).map((b) => ({ label: `From ${b.fromCode}`, cents: b.valueCents })), { label: 'Remaining', cents: remaining });
+  // Warnings stay up top with the number; the plain "how the rules applied" notes go in the fold.
+  const allFlags = flags(rec, code, devRule.value);
+  const alerts = allFlags.filter(([c]) => c === 'alert');
+  const notes = allFlags.filter(([c]) => c !== 'alert');
 
   return `
     <div class="period-nav">
@@ -86,21 +97,19 @@ function deviationTab(app, dev, code, sim) {
     </div>
     <p class="rate-line">${devRule.value.model === 'carryThenHotel' ? 'New rule: balance stays 3 more bid periods, then 50% to hotel bank' : 'Old rule: unused balance halves each bid period'}</p>
 
-    <section class="card">
-      <dl class="kv">
-        <div><dt>Bank this bid period</dt><dd>${x.money(bank, bankEx, { cls: 'num' })}<small>${dhs.length} deadhead${dhs.length === 1 ? '' : 's'} credited</small></dd></div>
-        <div><dt>Carried in</dt><dd>${x.money(carried, carriedEx, { cls: 'num' })}<small>From earlier bid periods</small></dd></div>
-        <div><dt>Spent</dt><dd>${x.money(spent, spentEx, { cls: 'num' })}<small>Allowable, after caps</small></dd></div>
-        <div class="${over ? 'is-alert' : ''}"><dt>${over ? 'Over, on you' : 'Remaining'}</dt><dd>${over ? `<span class="num alert-text">${$(over)}</span>` : x.money(remaining, remEx, { cls: 'num' })}<small>${over ? 'Above bank, balances and hotel bank' : 'Bank + carried − spent'}</small></dd></div>
-      </dl>
+    <section class="card hero">
+      <div class="eyebrow">${over ? 'Over your bank this bid period' : 'Left to spend this bid period'}</div>
+      <div class="hero-amt">${over ? `<span class="money big alert-text" style="text-decoration:none;cursor:default">${$(over)}</span>` : x.money(remaining, remEx, { cls: 'big', mark: false })}</div>
+      <p class="hero-sub">${over ? 'Above your bank, earlier balances and the hotel bank.' : `Bank ${$(bank)} + carried in ${$(carried)} − spent ${$(spent)}`}</p>
+      ${alerts.length ? `<ul class="flags">${alerts.map(([c, t]) => `<li class="${c}">${esc(t)}</li>`).join('')}</ul>` : ''}
+      <button type="button" class="btn primary big wide mt" data-act="add-dh">Add a deadhead</button>
+      <p class="hint center">A scheduled commercial deadhead puts its fare in your bank.</p>
+      <button type="button" class="btn wide" data-act="add-ex">Add an expense</button>
+      <p class="hint center">What you spent getting to or from the trip.</p>
     </section>
 
-    ${(() => { const f = flags(rec, code, devRule.value); return f.length ? `<section class="card"><h2>What the rules do here</h2><ul class="flags">${f.map(([c, t]) => `<li class="${c}">${esc(t)}</li>`).join('')}</ul></section>` : ''; })()}
-
-    ${rec?.balances?.length ? `<section class="card"><h2>Balances after ${code}</h2><ul class="ledger bal">${rec.balances.map(balanceLine).join('')}</ul></section>` : ''}
-
     <section class="card">
-      <div class="row-head"><h2>Deadheads</h2><button type="button" class="btn small primary" data-act="add-dh">+ Deadhead</button></div>
+      <h2>Deadheads</h2>
       ${dhs.length ? `<ul class="entries">${dhs.map((d) => `
         <li data-entry="${d.id}">
           <span><b>${esc(d.route || 'Deadhead')}</b><small>${d.date ? formatDate(d.date, { year: true }) : ''}</small>
@@ -108,11 +117,11 @@ function deviationTab(app, dev, code, sim) {
           ${d.changed ? '<small class="note-inline">Company changed or cancelled this deadhead: the bank money stays (8.C.2.d).</small>' : ''}</span>
           <span class="num">${$(parseMoney(d.fare) || 0)}</span>
           <button type="button" class="icon-btn" data-act="del-entry" aria-label="Remove">${ICON.close}</button>
-        </li>`).join('')}</ul>` : '<p class="muted small">Add each scheduled commercial deadhead and the fare credited for it.</p>'}
+        </li>`).join('')}</ul>` : '<p class="muted small">None added for this bid period.</p>'}
     </section>
 
     <section class="card">
-      <div class="row-head"><h2>Expenses</h2><button type="button" class="btn small" data-act="add-ex">+ Expense</button></div>
+      <h2>Expenses</h2>
       ${exps.length ? `<ul class="entries">${exps.map((e) => {
         const c = capOf(e.id);
         return `<li data-entry="${e.id}">
@@ -121,16 +130,25 @@ function deviationTab(app, dev, code, sim) {
           <span class="num">${$(parseMoney(e.amount) || 0)}</span>
           <button type="button" class="icon-btn" data-act="del-entry" aria-label="Remove">${ICON.close}</button>
         </li>`;
-      }).join('')}</ul>` : '<p class="muted small">Airfare, seat fees, surface transport, hotel, parking.</p>'}
+      }).join('')}</ul>` : '<p class="muted small">None added for this bid period. Airfare, seat fees, surface transport, hotel and parking all count.</p>'}
     </section>
 
-    <section class="card">
-      <h2>Paste from company screen</h2>
+    ${fold('math', 'How the number adds up', 'Bank, carried in, spent', `
+      <dl class="kv">
+        <div><dt>Bank this bid period</dt><dd>${x.money(bank, bankEx, { cls: 'num' })}<small>${dhs.length} deadhead${dhs.length === 1 ? '' : 's'} credited</small></dd></div>
+        <div><dt>Carried in</dt><dd>${x.money(carried, carriedEx, { cls: 'num' })}<small>From earlier bid periods</small></dd></div>
+        <div><dt>Spent</dt><dd>${x.money(spent, spentEx, { cls: 'num' })}<small>Allowable, after caps</small></dd></div>
+        <div class="${over ? 'is-alert' : ''}"><dt>${over ? 'Over, on you' : 'Remaining'}</dt><dd>${over ? `<span class="num alert-text">${$(over)}</span>` : x.money(remaining, remEx, { cls: 'num' })}<small>${over ? 'Above bank, balances and hotel bank' : 'Bank + carried − spent'}</small></dd></div>
+      </dl>
+      ${notes.length ? `<ul class="flags">${notes.map(([c, t]) => `<li class="${c}">${esc(t)}</li>`).join('')}</ul>` : ''}`)}
+
+    ${rec?.balances?.length ? fold('balances', 'What carries forward', `${rec.balances.length} balance${rec.balances.length === 1 ? '' : 's'} after ${code}`, `<ul class="ledger bal">${rec.balances.map(balanceLine).join('')}</ul>`) : ''}
+
+    ${fold('paste', 'Check against the company screen', dev.imported ? `Using ${dev.imported.rows.length} pasted balance${dev.imported.rows.length === 1 ? '' : 's'}` : 'Paste the Deviation Bank Allocation view', `
       ${dev.imported ? `<p class="note small">Using ${dev.imported.rows.length} pasted balance${dev.imported.rows.length === 1 ? '' : 's'} (company screen as of ${dev.imported.asOf || 'unknown'}). <button type="button" class="link" data-act="clear-import">Clear</button></p>` : ''}
       <p class="muted small">Copy the Deviation Bank Allocation view and paste it here. Read on this phone only.</p>
       <textarea class="paste" data-paste rows="5" placeholder="FEB26  $2,384.52  256  $9.32" aria-label="Company deviation screen text"></textarea>
-      <div data-out="paste"></div>
-    </section>`;
+      <div data-out="paste"></div>`)}`;
 }
 
 function pasteResult(text, code) {
@@ -175,20 +193,17 @@ function hotelTab(app, dev, code, sim) {
   const anyLegacy = h.rows.some((r) => r.legacyAmount);
   const totalEx = { title: 'Hotel bank', lines: h.rows.map((r) => ({ label: `${r.code}: ${HOTEL_KIND[r.kind] || r.kind}`, text: r.overflowCents ? `${$(r.overflowCents)} over the cap was lost` : '', cents: r.cents })), total: { label: 'Remaining', cents: h.remainingCents }, sources: [hv] };
   return `
-    <section class="card">
-      <div class="row-head"><h2>Hotel bank</h2><span class="muted small">through ${code}</span></div>
-      <div class="hotel-big">${x.money(h.remainingCents, totalEx, { cls: 'big' })}</div>
-      <table class="cmp hotel-cmp">
-        <thead><tr><th></th><th>App</th><th>Company</th><th>Diff</th></tr></thead>
-        <tbody>${row('accrued', 'Total accrued', h.accruedCents)}${row('used', 'Total used', h.usedCents)}${row('remaining', 'Remaining', h.remainingCents)}</tbody>
-      </table>
-      <p class="muted small">Type the three numbers the company shows to find what's missing. Cap $15,000; up to $7,500 a bid period can cover deviation expenses.</p>
+    <section class="card hero">
+      <div class="eyebrow">Your hotel bank, through ${code}</div>
+      <div class="hero-amt">${x.money(h.remainingCents, totalEx, { cls: 'big' })}</div>
+      <p class="hero-sub">Cap $15,000. Up to $7,500 a bid period can cover deviation expenses.</p>
       ${h.overflowCents ? `<p class="note small alert">${$(h.overflowCents)} of credits were lost to the $15,000 cap.</p>` : ''}
+      <button type="button" class="btn primary big wide mt" data-act="add-room">Add a cancelled room</button>
+      <p class="hint center">Counts when you cancel at least 26 hours before check-in and still fly the trip (8.C.2.h). $50 domestic, $70 international from the Dec 2026 bid period.</p>
     </section>
 
     <section class="card">
-      <div class="row-head"><h2>Hotel bank entries</h2><button type="button" class="btn small primary" data-act="add-room">+ Cancelled room</button></div>
-      <p class="note small">A cancelled room counts when cancelled at least 26 hours before scheduled check-in, and you operated the trip (8.C.2.h). $50 domestic, $70 international from the Dec 2026 bid period.</p>
+      <h2>Hotel bank entries</h2>
       ${h.rows.length ? `<ul class="entries">${h.rows.slice().reverse().map((r) => `
         <li ${r.id != null ? `data-room="${r.id}"` : ''}>
           <span><b>${esc(HOTEL_KIND[r.kind] || r.kind)}</b><small>${r.code}${r.date ? ` · ${formatDate(r.date, { year: true })}` : ''}${r.fromCode ? ` · from ${r.fromCode}` : ''}${r.legacyAmount ? ` · old-agreement amount ${confirmPill}` : ''}</small></span>
@@ -197,14 +212,19 @@ function hotelTab(app, dev, code, sim) {
         </li>`).join('')}</ul>` : '<p class="muted small">No entries yet.</p>'}
     </section>
 
-    <details class="card" ${anyLegacy ? 'open' : ''}>
-      <summary><b>Before the Dec 2026 bid period</b> ${confirmPill}</summary>
+    ${fold('hotel-check', 'Check against the company\'s numbers', 'Type the three figures the company shows', `
+      <table class="cmp hotel-cmp">
+        <thead><tr><th></th><th>App</th><th>Company</th><th>Diff</th></tr></thead>
+        <tbody>${row('accrued', 'Total accrued', h.accruedCents)}${row('used', 'Total used', h.usedCents)}${row('remaining', 'Remaining', h.remainingCents)}</tbody>
+      </table>
+      <p class="muted small">A difference shows which entries are missing here.</p>`)}
+
+    ${fold('hotel-legacy', `Rooms before the Dec 2026 bid period ${confirmPill}`, 'Old-agreement per-room amounts', `
       <p class="small">The old agreement's per-room amounts aren't loaded. Enter yours to count rooms cancelled before December 2026.</p>
       <div class="grid2">
         <label class="f"><span>Domestic room</span><input data-legacy="domestic" value="${esc(dev.hotelLegacy.domestic)}" inputmode="decimal" placeholder="$" autocomplete="off"></label>
         <label class="f"><span>International room</span><input data-legacy="international" value="${esc(dev.hotelLegacy.international)}" inputmode="decimal" placeholder="$" autocomplete="off"></label>
-      </div>
-    </details>`;
+      </div>`, anyLegacy)}`;
 }
 
 /* ------------------------------------------------------------------ forms */
@@ -286,6 +306,11 @@ export default {
     const dev = ensureDev(state);
     const code = viewCode(dev);
     const rerender = () => { app.save(); app.render({ keepScroll: true }); };
+    // <details> toggles don't bubble: listen on the way down, and remember what's open across re-renders.
+    el.addEventListener('toggle', (e) => {
+      const k = e.target.dataset?.fold;
+      if (k) { if (e.target.open) openFolds.add(k); else openFolds.delete(k); }
+    }, true);
 
     el.addEventListener('change', (e) => {
       if (e.target.matches('[data-tab]')) { dev.tab = e.target.value; app.save(); app.render(); }

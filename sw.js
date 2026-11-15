@@ -1,6 +1,6 @@
 // Offline support. The whole app is cached as one version, so a phone never mixes old and new files.
 // When you change any file, bump APP_VERSION in config.js and VERSION here to match (a test checks).
-const VERSION = 'line-ledger-0.7.1';
+const VERSION = 'line-ledger-0.8.0';
 const FILES = [
   './',
   'index.html',
@@ -40,8 +40,8 @@ const FILES = [
 ];
 
 // crewport.co used to run Crewport Car Share, whose offline worker also lived at /sw.js. When this
-// worker replaces one that isn't Line Ledger's (no line-ledger cache yet), it takes over right away
-// instead of waiting, so old Car Share visitors land on Line Ledger. Line Ledger updates still wait
+// worker replaces one that isn't Crewport Pay's (no line-ledger cache yet), it takes over right away
+// instead of waiting, so old Car Share visitors land on Crewport Pay. Crewport Pay updates still wait
 // for the user's "Reload".
 const OLD_APP_CACHES = ['crewport-'];
 

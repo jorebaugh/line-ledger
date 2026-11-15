@@ -3,8 +3,15 @@
 
 import { formatMoney as $, formatDate, parseMoney, parsePct } from '../core.js';
 import { k401View, AGE_BANDS } from '../k401.js';
-import { esc, confirmPill, toast } from '../ui.js';
+import { esc, confirmPill, toast, ICON } from '../ui.js';
 import { stubSummaryHTML, openStubSheet } from './stub-sheet.js';
+
+const openFolds = new Set(); // folded sections the user opened
+const fold = (key, title, sub, body, forceOpen = false) => `
+  <details class="card fold" data-fold="${key}" ${forceOpen || openFolds.has(key) ? 'open' : ''}>
+    <summary><span class="act-t"><b>${title}</b><small class="muted">${sub}</small></span>${ICON.chevron}</summary>
+    <div class="fold-body">${body}</div>
+  </details>`;
 
 const pctW = (a, b) => (b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 0);
 const meter = (v, limit, over = false) => `<div class="meter ${over ? 'over' : ''}" role="img" aria-label="${pctW(v, limit)}% of limit"><span style="width:${pctW(v, limit)}%"></span></div>`;
@@ -49,17 +56,34 @@ export default {
     return `
       <h1>401(k) ${v.year}</h1>
       <section class="card hero">
-        <div class="row-head"><h2>Pre-tax + Roth by Dec 31</h2><span class="muted small">limit ${$(L.deferral, { whole: true })}${irsMark}</span></div>
+        <div class="eyebrow">Your pre-tax + Roth by Dec 31</div>
         <div class="hero-amt">${x.money(e.deferral, projExplain(v, 'deferral', 'Pre-tax + Roth', y.deferral, e.deferral, notes), { cls: 'big', whole: true, mark: false })}</div>
+        <div class="row-head"><span class="muted small">Your limit this year</span><span class="num small">${$(L.deferral, { whole: true })}${irsMark}</span></div>
         ${meter(e.deferral, L.deferral)}
-        <div class="row-head mt"><span class="muted small">Total additions (415(c))</span><span class="num small">${$(e.counted, { whole: true })} of ${$(L.total, { whole: true })}</span></div>
+        <div class="row-head mt"><span class="muted small">You + company, all in</span><span class="num small">${$(e.counted, { whole: true })} of ${$(L.total, { whole: true })}</span></div>
         ${meter(e.counted, L.total, v.proj.overTotal > 0)}
         <ul class="flags">${v.flags.map((f) => `<li class="${f.tone === 'alert' ? 'alert' : ''}">${esc(f.text)}</li>`).join('')}</ul>
-        <p class="small muted mt">${esc(src)}</p>
       </section>
 
       <section class="card">
-        <h2>Year to date and December 31</h2>
+        <h2>Your elections</h2>
+        <div class="grid3 mt">
+          <label class="f"><span>Pre-tax</span><span class="suffix-wrap"><input data-prof="pretax" inputmode="decimal" value="${esc(p.pretax || '')}" placeholder="0"><i>%</i></span></label>
+          <label class="f"><span>Roth</span><span class="suffix-wrap"><input data-prof="roth" inputmode="decimal" value="${esc(p.roth || '')}" placeholder="0"><i>%</i></span></label>
+          <label class="f"><span>After-tax</span><span class="suffix-wrap"><input data-prof="aftertax" inputmode="decimal" value="${esc(p.aftertax || '')}" placeholder="0"><i>%</i></span></label>
+        </div>
+        <label class="f mt"><span>Age this year</span><select data-prof="ageBand">${Object.entries(AGE_BANDS).map(([val, l]) => `<option value="${val}" ${v.ageBand === val ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <p class="hint">Change a percentage and the number above updates.</p>
+      </section>
+
+      <section class="card">
+        <h2>Your year so far</h2>
+        <p class="hint">${esc(src)}</p>
+        <button type="button" class="btn ${v.source === 'stub' ? '' : 'primary big'} wide mt" data-act="paste-stub">${v.source === 'stub' ? 'Add a newer pay stub' : 'Add a pay stub'}</button>
+        ${v.source === 'stub' ? '' : '<p class="hint center">Fastest: the app reads your real year-to-date numbers off the stub.</p>'}
+      </section>
+
+      ${fold('table', 'So far and by Dec 31', 'Each kind of contribution against its limit', `
         <table class="k-table">
           <thead><tr><th></th><th>So far</th><th>Dec 31</th><th>Limit</th></tr></thead>
           <tbody>
@@ -71,45 +95,36 @@ export default {
           </tbody>
         </table>
         ${e.catchUp ? `<p class="small muted">${$(e.catchUp)} of that is catch-up, which doesn't count toward total additions.</p>` : ''}
-        <p class="small muted">Eligible pay by Dec 31: ${$(e.eligible, { whole: true })} (compensation limit ${$(L.comp, { whole: true })}${irsMark}).</p>
-      </section>
+        <p class="small muted">Eligible pay by Dec 31: ${$(e.eligible, { whole: true })} (compensation limit ${$(L.comp, { whole: true })}${irsMark}).</p>`)}
 
-      <section class="card">
-        <div class="row-head"><h2>Your numbers</h2><button type="button" class="btn small primary" data-act="paste-stub">Add pay stub</button></div>
-        <div class="grid3">
-          <label class="f"><span>Pre-tax</span><span class="suffix-wrap"><input data-prof="pretax" inputmode="decimal" value="${esc(p.pretax || '')}" placeholder="0"><i>%</i></span></label>
-          <label class="f"><span>Roth</span><span class="suffix-wrap"><input data-prof="roth" inputmode="decimal" value="${esc(p.roth || '')}" placeholder="0"><i>%</i></span></label>
-          <label class="f"><span>After-tax</span><span class="suffix-wrap"><input data-prof="aftertax" inputmode="decimal" value="${esc(p.aftertax || '')}" placeholder="0"><i>%</i></span></label>
+      ${fold('ytd', 'Type your year-to-date figures', v.source === 'stub' ? 'Filled from your stub. Type to override.' : 'Only if you have no stub to add', `
+        <div class="stack">
+          ${ytdInput('eligible', 'Eligible pay', y.eligible)}
+          ${ytdInput('deferral', 'Pre-tax + Roth', y.deferral)}
+          ${ytdInput('after', 'After-tax', y.after)}
+          ${ytdInput('company', 'Company contribution', y.company)}
+          ${ytdInput('match', 'Company match', y.match)}
         </div>
-        <label class="f"><span>Age this year</span><select data-prof="ageBand">${Object.entries(AGE_BANDS).map(([val, l]) => `<option value="${val}" ${v.ageBand === val ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <details class="more" ${Object.keys(v.typed).length ? 'open' : ''}>
-          <summary>Year to date figures <span class="muted">(${v.source === 'stub' ? 'from your stub' : 'type to override'})</span></summary>
-          <div class="grid2">
-            ${ytdInput('eligible', 'Eligible pay', y.eligible)}
-            ${ytdInput('deferral', 'Pre-tax + Roth', y.deferral)}
-            ${ytdInput('after', 'After-tax', y.after)}
-            ${ytdInput('company', 'Company contribution', y.company)}
-            ${ytdInput('match', 'Company match', y.match)}
-          </div>
-          ${Object.keys(v.typed).length ? '<button type="button" class="btn ghost small" data-act="clear-ytd">Clear typed figures</button>' : ''}
-        </details>
-      </section>
+        ${Object.keys(v.typed).length ? '<button type="button" class="btn ghost small mt" data-act="clear-ytd">Clear typed figures</button>' : ''}`, Object.keys(v.typed).length > 0)}
 
-      ${v.stub ? `<section class="card"><div class="row-head"><h2>Latest stub</h2><span class="muted small">${(app.state.stubs || []).length} saved</span></div>${stubSummaryHTML(v.stub)}</section>` : ''}
+      ${v.stub ? fold('stub', 'Latest stub', `${formatDate(v.stub.adviceDate, { year: true })} · ${(app.state.stubs || []).length} saved`, stubSummaryHTML(v.stub)) : ''}
 
-      <section class="card">
-        <h2>The rules used</h2>
+      ${fold('rules', 'The rules used', 'Plan and IRS limits behind these numbers', `
         <ul class="bullets small">
           <li>Pre-tax and Roth up to ${L.p.pretaxRothMaxPct}% of eligible pay; after-tax up to ${L.p.aftertaxMaxPct}% (Sec. 28.D.14-15).</li>
           <li>Company contribution ${L.p.companyPct}% of eligible pay each pay period, subject to Code limits (Sec. 28.D.4.a, through 2027).</li>
           <li>Company match 50% of the first $1,000 of pre-tax + Roth, ${$(L.p.matchMax, { whole: true })} max (Sec. 28.D.3).</li>
           <li>IRS limits for ${v.year}: employee ${$(L.deferral, { whole: true })}, total additions ${$(L.total, { whole: true })}, compensation ${$(L.comp, { whole: true })} (${esc(L.irs.source)})${irsMark}.</li>
           <li>From 2028, company money a pilot in the cash balance plan or enhanced 401(k) can't put in because of the Code limits is paid in cash (Sec. 28.D.4.b).</li>
-        </ul>
-      </section>`;
+        </ul>`)}`;
   },
   mount(el, app) {
     const st = app.state;
+    // <details> toggles don't bubble: listen on the way down, and remember what's open across re-renders.
+    el.addEventListener('toggle', (e) => {
+      const k = e.target.dataset?.fold;
+      if (k) { if (e.target.open) openFolds.add(k); else openFolds.delete(k); }
+    }, true);
     el.addEventListener('change', (e) => {
       const t = e.target;
       if (t.dataset.prof) {

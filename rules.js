@@ -1,5 +1,5 @@
 /**
- * rules.js: every contract number Line Ledger uses lives here, and only here.
+ * rules.js: every contract number Crewport Pay uses lives here, and only here.
  *
  * HOW IT WORKS
  * Each rule is a list of versions. For a given bid period the app uses the latest

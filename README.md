@@ -1,4 +1,4 @@
-# Line Ledger (preview)
+# Crewport Pay (preview)
 
 A static, phone-first pay estimator for pilots. No backend, no accounts, no analytics.
 Everything a user enters stays in their browser's `localStorage`.
@@ -79,7 +79,7 @@ if they fail or if anything under `tests/` is tracked.
 2. Repository Settings, then Pages: deploy from branch `main`, folder `/ (root)`. `.nojekyll` serves files as-is.
 3. The site is served at https://www.crewport.co (the `CNAME` file; GoDaddy DNS: `@` A record to GitHub Pages,
    `www` CNAME to `jorebaugh.github.io`). crewport.co and the github.io address forward there. www is the main
-   address on purpose: Crewport Car Share's offline worker lived at www.crewport.co/sw.js, and Line Ledger's `sw.js`
+   address on purpose: Crewport Car Share's offline worker lived at www.crewport.co/sw.js, and Crewport Pay's `sw.js`
    replaces it there. All paths are relative.
 
 Saved data is per web address. Moving the app to a different address later leaves everyone's entries behind
@@ -148,3 +148,9 @@ js/screens/*.js     intake, home, pay, banks, 401(k), retire, settings, the shar
                     (later.js is no longer used)
 tests/              node:test unit tests and fixtures (local only, not in the public repository)
 ```
+
+## Names and icon
+
+The app is called Crewport Pay. The repository, the folder, the saved-data key (`lineLedger.v1`) and the offline
+cache prefix (`line-ledger-`) keep the earlier name on purpose: changing them would drop saved data or strand the
+old cache. The icon set is drawn by `python3 tools/make-icons.py icons` (pure Python, no image library).

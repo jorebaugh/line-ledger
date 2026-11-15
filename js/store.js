@@ -114,18 +114,18 @@ export function newRow(state, type) {
 }
 
 export function exportJSON(state) {
-  const data = { app: 'Line Ledger', exportedAt: new Date().toISOString(), ...state };
+  const data = { app: 'Crewport Pay', exportedAt: new Date().toISOString(), ...state };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   const d = new Date();
   a.href = URL.createObjectURL(blob);
-  a.download = `line-ledger-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+  a.download = `crewport-pay-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
 }
 
-// Read an exported file back in. Returns the state, or null if it isn't a Line Ledger export.
+// Read an exported file back in. Returns the state, or null if it isn't a Crewport Pay export.
 export function parseImport(text) {
   try {
     const d = JSON.parse(text);

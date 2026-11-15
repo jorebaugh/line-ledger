@@ -1,4 +1,4 @@
-/* Line Ledger: calm, numbers-first. Mobile first (390px), centered column on desktop. */
+/* Crewport Pay: calm, numbers-first. Mobile first (390px), centered column on desktop. */
 
 :root {
   --bg: #F4F6F9;
@@ -526,3 +526,4 @@ ul.fold-body { margin: 0; padding-left: 34px; }
   .wiz h1 { font-size: 26px; }
 }
 .wiz-opts.tight .wiz-opt { min-height: 68px; padding: 12px 20px; font-size: 20px; }
+.logo { background: none; width: 32px; height: 32px; border-radius: 8px; display: block; }
