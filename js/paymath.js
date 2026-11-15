@@ -43,7 +43,7 @@ export function payContext(rules, profile, code) {
     osc: r('overrideScheduledCredit'), oscFloor: r('oscShortLegFloor'), credit: r('creditValues'),
     intlDef: r('internationalDefinition'), overageAch: r('overageFromAch'), role: r('bidPeriodOverride'), roleCheck: r('bidPeriodOverrideCheck'),
     payOnly: r('payOnlyLine'), dayOff: r('instructDayOffPct'),
-    disrupt: r('disruptionPay'), disruptRate: r('disruptionRate'),
+    disrupt: r('disruptionPay'), disruptRate: r('disruptionRate'), rday: r('rdayValue'),
   };
   const fleet = profile.fleet === 'NB' ? 'narrowbody' : 'widebody';
   const seat = profile.seat === 'CA' ? 'CA' : 'FO';
@@ -106,6 +106,7 @@ export const ROW_TYPES = {
   draft: { label: 'VLT / DRF / AVA trip', hint: '150% on top of guarantee (4.Q.1)', gpe: true },
   reserve: { label: 'Reserve CH above RLG', hint: 'R-day credit over RLG at 150%' },
   overage: { label: 'Overage', hint: 'More than 2 hrs into days off: first 12 CH 150%, rest 200%' },
+  vacation: { label: 'Vacation on a reserve line', hint: 'Each vacation day counts as an R-day toward RLG. No pay of its own (7.G.3.d.vi, 4.H.2)' },
   disrupt: { label: 'Disruption pay', hint: 'Extra landing, layover change, extra duty period, recall from rest and the like (4.W to 4.Z)' },
   pmu: { label: 'PMU / SMU', hint: '125% (PMU up to your OTP eligibility, 4.N.3). General make-up (M/U) is 100%: add it as a trip', gpe: true },
   other: { label: 'Other pay at 100%', hint: 'Sim support, training, misc.', gpe: true },
@@ -158,7 +159,8 @@ export const payLogsDue = (calc) => calc.rows.flatMap((r) => r.items
   .filter((i) => i.payLog?.need === 'yes' && !i.logSent)
   .map((i) => ({ rowId: r.row.id, label: i.label, cents: i.cents })));
 
-export function calcRow(row, ctx) {
+// env: { gMin, weeks } of the bid period the row sits in, for rows that depend on the guarantee.
+export function calcRow(row, ctx, env = {}) {
   const t = ROW_TYPES[row.type];
   if (!t) return { row, items: [], error: 'Unknown row type' };
   let res;
@@ -177,6 +179,16 @@ export function calcRow(row, ctx) {
     case 'overage': {
       const min = parseHours(row.hours);
       res = min == null || min <= 0 ? { items: [], error: 'Enter overage credit hours' } : { items: overageItems(min, ctx) };
+      break;
+    }
+    case 'vacation': {
+      // Reserve line: a vacation day is an R-day. Its R-day value (RLG ÷ R-days on the line) counts toward RLG.
+      const days = Math.max(0, Math.round(Number(row.count) || 0));
+      const rdays = Math.max(1, Math.round(Number(row.rdays) || ctx.rule.rday.value.rDaysByWeeks[env.weeks || 4] || 15));
+      if (!days) { res = { items: [], error: 'Enter the vacation days in this bid period' }; break; }
+      if (!(env.gMin > 0)) { res = { items: [], error: 'Enter your RLG first' }; break; }
+      const each = Math.round(env.gMin / rdays);
+      res = { items: [item('toward', 'Vacation days', `${days} × ${H(each)} R-day value (${H(env.gMin)} RLG ÷ ${rdays} R-days) counts toward RLG`, 0, [ctx.rule.rday], { minutes: days * each })] };
       break;
     }
     case 'disrupt': {
@@ -495,7 +507,8 @@ export function calcPeriod(period, ctx, { whatIfMin = 0 } = {}) {
   const typical = parseHours(ctx.profile.lineValue);
   const gSource = entered > 0 ? 'entered' : typical > 0 ? 'typical' : 'minimum';
   const gMin = gSource === 'entered' ? entered : gSource === 'typical' ? typical : minMin;
-  const reserveLine = ctx.profile.line === 'reserve';
+  // Regular or reserve line: this bid period's own setting, else the one in Settings.
+  const reserveLine = (period.line || ctx.profile.line) === 'reserve';
   const gLabel = reserveLine ? 'RLG' : 'BLG';
   const R = ctx.rateCents;
 
@@ -512,12 +525,12 @@ export function calcPeriod(period, ctx, { whatIfMin = 0 } = {}) {
     || (hasTrips && (r.type === 'perdiem' || r.type === 'override'));
   // An override row set to follow the guarantee uses the line value until the user types hours.
   const resolve = (r) => (r.auto === 'guarantee' && !(parseHours(r.hours) > 0) ? { ...r, hours: gMin / 60 } : r);
-  const rows = allRows.filter((r) => !replaced(r)).map((r) => calcRow(resolve(r), ctx));
+  const rows = allRows.filter((r) => !replaced(r)).map((r) => calcRow(resolve(r), ctx, { gMin, weeks }));
   const hiddenRowIds = allRows.filter(replaced).map((r) => r.id);
   const whatIf = whatIfMin > 0 ? calcRow({ id: 'whatif', type: 'draft', hours: whatIfMin / 60, whatIf: true }, ctx) : null;
 
   const guaranteeCents = payCents(gMin, R, 100);
-  const towardMin = trips.reduce((s, t) => s + t.towardMin, 0);
+  const towardMin = trips.reduce((s, t) => s + t.towardMin, 0) + rows.reduce((s, r) => s + r.towardMin, 0);
   const excessMin = Math.max(0, towardMin - gMin);
   const excessPct = reserveLine ? ctx.rule.reserve.value.overRlgPct : 100;
   const excess = excessMin > 0

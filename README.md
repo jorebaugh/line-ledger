@@ -47,6 +47,12 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
   LOA, Appendix A), or "the contract does not say". Rows not marked sent show on Home as pay logs to send.
 - A whole month of Trip Recaps in one paste: recaps pasted one after another are split at each trip header,
   listed with tick boxes, and each goes to the bid period it started in. Trips already added are unticked.
+- Any paste box takes any paste: a trip recap pasted into the pay stub box (or a stub pasted into a trip box)
+  is recognised, says what it is, and opens in the right place with the paste carried over.
+- Reserve or regular line by bid period: "This bid period you hold a" on Pay overrides the line type in Settings
+  for that bid period (RLG, and credit over RLG at 150%, 4.H.7). Vacation on a reserve line (`rdayValue`): each
+  vacation day counts as an R-day, one R-day value (RLG ÷ R-days on the line) toward RLG, with no pay of its own
+  (4.C, 7.G.3.b, 7.G.3.d.vi, 4.H.2).
 - What's a trip worth: paste a trip (open time, draft offer or recap) and see what it adds on top of guarantee
   at 150%, 125% or 100%, the rough take-home, the take-home per hour and per day away, and the check it lands on.
 - Take-home by check: the 15th and the end-of-month check keep their own withholding percentage and other

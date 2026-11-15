@@ -4,6 +4,7 @@
 import { formatMoney as $, formatDate, parseMoney } from '../core.js';
 import { parseStub, summarizeStub, stubWhich, applyStub, CHECK_NAME, CHECK_A, CHECK_KEYS } from '../stub.js';
 import { pdfText } from '../pdftext.js';
+import { parseRecaps } from '../recap.js';
 import { esc, openSheet, toast } from '../ui.js';
 
 export function stubSummaryHTML(s) {
@@ -31,7 +32,8 @@ export function stubSummaryHTML(s) {
 }
 
 // onSave(stub): called after the stub is saved and before the screen redraws.
-export function openStubSheet(app, { onSave } = {}) {
+// text: something already pasted elsewhere that turned out to be a stub.
+export function openStubSheet(app, { onSave, text = '' } = {}) {
   openSheet('Add a pay stub', `
     <p class="small muted">Pick the PDF of your earnings statement, or open it, select all, copy and paste the text. It's read on this phone only. Only pay lines and dates are read: your name, address, employee number and account are ignored and never saved.</p>
     <label class="btn primary file-btn">Choose the stub PDF<input type="file" accept="application/pdf,.pdf" data-stub-file></label>
@@ -41,6 +43,7 @@ export function openStubSheet(app, { onSave } = {}) {
     const pv = body.querySelector('.stub-preview');
     const file = body.querySelector('[data-stub-file]');
     let s = null;
+    let pasted = '';
     file.addEventListener('change', async () => {
       const f = file.files?.[0];
       if (!f) return;
@@ -59,7 +62,18 @@ export function openStubSheet(app, { onSave } = {}) {
     function show(text, from) {
       if (!text.trim()) { pv.innerHTML = ''; return; }
       const st = parseStub(text);
-      if (!st.ok) { s = null; pv.innerHTML = `<p class="note small">No pay lines found in ${esc(from)}. ${from === 'the paste' ? 'Paste the whole statement.' : 'Try pasting the text instead.'}</p>`; return; }
+      if (!st.ok) {
+        s = null;
+        // A trip recap pasted into the stub box: say so and offer to add it as trips.
+        const trips = parseRecaps(text);
+        pv.innerHTML = trips.length
+          ? `<div class="recap-card"><b>That's ${trips.length === 1 ? 'a trip recap' : `${trips.length} trip recaps`}, not a pay stub.</b>
+              <p class="small muted">Trips go under Pay, Your trips. Tap below and it opens there with this paste.</p>
+              <button type="button" class="btn primary big mt" data-as-recap>Add ${trips.length === 1 ? 'it as a trip' : 'them as trips'}</button></div>`
+          : `<p class="note small">No pay lines found in ${esc(from)}. ${from === 'the paste' ? 'Paste the whole statement.' : 'Try pasting the text instead.'}</p>`;
+        pasted = trips.length ? text : '';
+        return;
+      }
       s = summarizeStub(st);
       const p = app.state.profile;
       const w = stubWhich(s);
@@ -82,6 +96,12 @@ export function openStubSheet(app, { onSave } = {}) {
         </div>`;
     }
     pv.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-as-recap]') && pasted) {
+        app.pendingPaste = { kind: 'recap', text: pasted };
+        close();
+        app.go('pay');
+        return;
+      }
       if (!ev.target.closest('[data-save-stub]') || !s) return;
       const st = app.state;
       st.stubs = [...(st.stubs || []).filter((x) => x.adviceDate !== s.adviceDate), s].sort((a, b) => (a.adviceDate < b.adviceDate ? -1 : 1)).slice(-26);
@@ -102,5 +122,6 @@ export function openStubSheet(app, { onSave } = {}) {
       toast(needOther ? `Saved your ${CHECK_NAME[w]} check. Now add ${CHECK_A[o]} stub.` : `Saved the ${formatDate(s.adviceDate)} stub`);
       app.render({ keepScroll: true });
     });
+    if (text) { ta.value = text; show(text, 'the paste'); }
   });
 }

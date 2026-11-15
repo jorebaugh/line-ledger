@@ -10,7 +10,7 @@ import { RULES } from '../../rules.js';
 import { ROW_TYPES, ASSIGNMENTS, assignInfo, estimateNet, auditCheck, seatName, fleetName, payContext, payLogStatus, tripWorth, checkDates } from '../paymath.js';
 import { parseRecaps, recapToTrip, reconcileRecapTrip, fareCredit } from '../recap.js';
 import { auditStub, auditSentence, claimNote, stubsFor, stubCode } from '../audit.js';
-import { stubWhich } from '../stub.js';
+import { stubWhich, parseStub } from '../stub.js';
 import { openStubSheet } from './stub-sheet.js';
 import { ensurePeriod, ensureDev, newTrip, newRow, newDutyPeriod } from '../store.js';
 import {
@@ -304,13 +304,19 @@ function tripCard(t, code, payOnly = false) {
   </article>`;
 }
 
-function rowCard(r, code, gMin) {
+function rowCard(r, code, gMin, weeks = 4) {
   const t = ROW_TYPES[r.type];
   let fields = '';
   const follows = r.auto === 'guarantee' && !(parseHours(r.hours) > 0);
   if (r.type === 'perdiem') fields = `<div class="grid2">${hoursInput('tafbDom', r.tafbDom, '0:00', 'Domestic TAFB')}${hoursInput('tafbIntl', r.tafbIntl, '0:00', 'International TAFB')}</div>`;
   else if (r.type === 'adjust') fields = `<div class="grid2"><label class="f"><span>Label</span><input data-f="label" value="${esc(r.label)}" placeholder="e.g. LCA pay" autocomplete="off"></label><label class="f"><span>Amount</span><input data-f="amount" value="${esc(r.amount)}" inputmode="decimal" placeholder="$0.00 or -50" autocomplete="off"></label></div>`;
   else if (r.type === 'other') fields = `<div class="grid2"><label class="f"><span>Label</span><input data-f="label" value="${esc(r.label)}" placeholder="e.g. Sim support" autocomplete="off"></label>${hoursInput('hours', r.hours, '0:00', 'Credit hours')}</div>`;
+  else if (r.type === 'vacation') {
+    const def = ruleAt(RULES, 'rdayValue', code).value.rDaysByWeeks[weeks] || 15;
+    fields = `<div class="grid2"><label class="f"><span>Vacation days <small class="muted">this bid period</small></span><input data-f="count" value="${esc(r.count ?? '')}" inputmode="numeric" placeholder="e.g. 7" autocomplete="off"></label>
+      <label class="f"><span>R-days on the line</span><input data-f="rdays" value="${esc(r.rdays ?? '')}" inputmode="numeric" placeholder="${def}" autocomplete="off"></label></div>
+      <p class="hint">On a reserve line you are paid the full RLG. Each vacation day counts as an R-day: one R-day value comes out of your vacation bank and counts toward RLG. Credit above RLG pays at 150% (4.H.7).</p>`;
+  }
   else if (r.type === 'disrupt') {
     const rule = ruleAt(RULES, 'disruptionPay', code);
     const d = rule.value;
@@ -468,6 +474,7 @@ export default {
 
       <section class="card" data-sec="line">
         <div class="row-head"><h2><span class="step-n" aria-hidden="true">1</span> Your line</h2>${seg('weeks-p', [['4', '4 wk'], ['5', '5 wk'], ['6', '6 wk']], String(v.c.weeks), { attrs: 'data-p="weeks"', cls: 'seg-small seg-inline' })}</div>
+        <div class="f"><span>This bid period you hold a</span>${seg('line-p', [['regular', 'Regular line'], ['reserve', 'Reserve line']], v.c.reserveLine ? 'reserve' : 'regular', { attrs: 'data-p="line"', cls: 'seg-small' })}</div>
         <label class="f"><span>Your awarded ${cur.payOnly ? 'pay-only line ' : ''}${g}, in credit hours</span>
           <input data-p="guarantee" value="${esc(cur.guarantee)}" placeholder="${v.c.guarantee.source === 'typical' ? `${esc(app.state.profile.lineValue)} typical` : `${H(v.c.guarantee.minMinutes)} minimum`}" autocomplete="off" spellcheck="false"></label>
         <p class="hint">From your bid package, like 72:30. Leave it blank to use the minimum.</p>
@@ -493,7 +500,7 @@ export default {
       <section class="card" data-sec="other">
         <h2>Other pay</h2>
         <p class="hint">Anything not tied to a trip above: disruption pay, draft or overage hours, reserve credit, per diem, a dollar adjustment.</p>
-        <div class="addons">${shownRows.map((r) => rowCard(r, code, v.c.guarantee.minutes)).join('')}</div>
+        <div class="addons">${shownRows.map((r) => rowCard(r, code, v.c.guarantee.minutes, v.c.weeks)).join('')}</div>
         ${o('hidden')}
         <div class="grid2 mt"><button type="button" class="btn" data-act="add-disrupt">Add disruption pay</button><button type="button" class="btn" data-act="add-row">Add other pay</button></div>
       </section>
@@ -591,6 +598,7 @@ export default {
         const p = period();
         if (pf === 'nextGuarantee') { ensurePeriod(state, shiftPeriod(code, 1)).guarantee = t.value; refresh(); return; }
         if (pf === 'payOnly') { p.payOnly = t.checked; if (structural) rerender(); return; }
+        if (pf === 'line') { p.line = t.value; if (structural) rerender(); return; }
         if (pf === 'whatIf') {
           p.whatIf = Number(t.value) || 0;
           const typed = el.querySelector('[data-p="whatIfTyped"]');
@@ -629,6 +637,101 @@ export default {
       t.setAttribute('aria-invalid', bad ? 'true' : 'false');
     });
 
+    // The stub the user just saved lands on the bid period and check it belongs to.
+    const onStubSave = (st) => {
+      const sc = stubCode(st);
+      const dest = ensurePeriod(state, sc);
+      dest.audit = { ...(dest.audit || { actual: '' }), check: stubWhich(st) };
+      state.viewCode = sc;
+      openFolds.add('audit');
+      pendingGo = 'stub';
+    };
+    // A pay stub pasted into a trip box: say so and offer to open it as a stub.
+    const stubNote = (text) => (parseStub(text).ok
+      ? `<div class="recap-card"><b>That's a pay stub, not a trip.</b><p class="small muted">Stubs go under Check a pay stub. Tap below and it opens there with this paste.</p><button type="button" class="btn primary big mt" data-as-stub>Open it as a pay stub</button></div>`
+      : '<p class="note small">No flight legs found in that text. Paste the whole Trip Recap page, from the trip number down to the crew list.</p>');
+    const asStub = (pv, ta, close) => pv.addEventListener('click', (ev) => {
+      if (!ev.target.closest('[data-as-stub]')) return;
+      const text = ta.value;
+      close();
+      openStubSheet(app, { onSave: onStubSave, text });
+    });
+
+    // prefill: text pasted somewhere else that turned out to be a trip recap.
+    const openRecapSheet = (prefill = '') => {
+    openSheet('Paste trip recaps', `
+      <p class="small muted">Copy the whole Trip Recap (or pairing) page and paste it here. Paste several, one after another, to add a whole month at once. It's read on this phone only. Names and employee numbers are ignored and never saved.</p>
+      <textarea class="paste" rows="7" placeholder="Paste the recap text" aria-label="Recap text"></textarea>
+      <div class="recap-preview"></div>`, (body, close) => {
+      const ta = body.querySelector('textarea');
+      const pv = body.querySelector('.recap-preview');
+      let parsed = null;
+      let many = [];
+      ta.addEventListener('input', () => {
+        if (!ta.value.trim()) { pv.innerHTML = ''; return; }
+        many = parseRecaps(ta.value);
+        parsed = many.length === 1 ? many[0] : null;
+        if (!many.length) { pv.innerHTML = stubNote(ta.value); return; }
+        pv.innerHTML = parsed ? recapPreviewHTML(parsed, code) : recapsPreviewHTML(many, state, code);
+      });
+      asStub(pv, ta, close);
+        // Several trips: add the ticked ones, each to the bid period it started in.
+      pv.addEventListener('click', (ev) => {
+        if (!ev.target.closest('[data-add-recaps]') || many.length < 2) return;
+        const picked = [...pv.querySelectorAll('[data-multi]:checked')].map((cb) => many[Number(cb.dataset.multi)]);
+        if (!picked.length) { toast('Tick at least one trip'); return; }
+        const targets = new Set();
+        for (const r of picked) {
+          const target = r.startDate ? periodFromISO(r.startDate) : code;
+          const fields = reconcileRecapTrip(recapToTrip(r), payContext(RULES, state.profile, target));
+          ensurePeriod(state, target).trips.push({ ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) });
+          targets.add(target);
+        }
+        if (!targets.has(code)) state.viewCode = [...targets].sort((a, b) => periodIndex(b) - periodIndex(a))[0];
+        close();
+        app.save();
+        toast(`Added ${picked.length} trip${picked.length === 1 ? '' : 's'} to ${[...targets].sort((a, b) => periodIndex(a) - periodIndex(b)).map(periodName).join(' and ')}`);
+        app.render();
+      });
+      const when = () => pv.querySelector('[data-fare-when]:checked')?.value || 'before';
+      pv.addEventListener('change', (ev) => {
+        if (!ev.target.matches('[data-fare-when]') || !parsed?.fares) return;
+        parsed.fares.forEach((f, i) => { const el = pv.querySelector(`[data-fare-credit="${i}"]`); if (el) el.textContent = $(fareCredit(f, when())); });
+      });
+      pv.addEventListener('click', (ev) => {
+        if (!ev.target.closest('[data-add-recap]') || !parsed?.ok) return;
+        const target = pv.querySelector('[data-recap-period]').value;
+        const fields = reconcileRecapTrip(recapToTrip(parsed), payContext(RULES, state.profile, target));
+        const trip = { ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) };
+        ensurePeriod(state, target).trips.push(trip);
+        // Ticked deadhead fares go to the deviation bank, in the bid period of the deadhead's showtime (8.C.2.c).
+        const dev = ensureDev(state);
+        const w = when();
+        let banked = 0;
+        pv.querySelectorAll('[data-fare]:checked').forEach((cb) => {
+          const f = parsed.fares[Number(cb.dataset.fare)];
+          const cents = fareCredit(f, w);
+          dev.entries.push({
+            id: state.nextId++, kind: 'deadhead', code: f.date ? periodFromISO(f.date) : target, date: f.date || '',
+            route: `${f.org}-${f.dst}`, fare: (cents / 100).toFixed(2), changed: false,
+            baseline: (f.baselineCents / 100).toFixed(2), established: (f.establishedCents / 100).toFixed(2), notified: w,
+            fromTrip: trip.recap?.tripNo || null,
+          });
+          banked += cents;
+        });
+        openTrips.add(trip.id);
+        state.viewCode = target;
+        close();
+        app.save();
+        toast(`Added ${trip.label || 'trip'} to ${periodName(target)}${banked ? `, ${$(banked)} to your deviation bank` : ''}`);
+        app.render();
+      });
+    });
+      const box = document.querySelector('.sheet textarea');
+      if (prefill && box) { box.value = prefill; box.dispatchEvent(new Event('input')); }
+      else setTimeout(() => box?.focus(), 50);
+    };
+
     const act = (e) => {
       const b = e.target.closest('[data-act]');
       if (!b || !el.contains(b)) return;
@@ -651,79 +754,12 @@ export default {
         card.querySelector('.trip-body').hidden = !openTrips.has(id);
         b.setAttribute('aria-expanded', String(openTrips.has(id)));
       } else if (a === 'add-trip') {
-        const t = newTrip(state, state.profile);
+        const t = newTrip(state, { ...state.profile, line: p.line || state.profile.line });
         p.trips.push(t);
         openTrips.add(t.id);
         rerender(`[data-trip="${t.id}"] input[data-f="sched"]`);
       } else if (a === 'paste-recap') {
-        openSheet('Paste trip recaps', `
-          <p class="small muted">Copy the whole Trip Recap (or pairing) page and paste it here. Paste several, one after another, to add a whole month at once. It's read on this phone only. Names and employee numbers are ignored and never saved.</p>
-          <textarea class="paste" rows="7" placeholder="Paste the recap text" aria-label="Recap text"></textarea>
-          <div class="recap-preview"></div>`, (body, close) => {
-          const ta = body.querySelector('textarea');
-          const pv = body.querySelector('.recap-preview');
-          let parsed = null;
-          let many = [];
-          ta.addEventListener('input', () => {
-            if (!ta.value.trim()) { pv.innerHTML = ''; return; }
-            many = parseRecaps(ta.value);
-            parsed = many.length === 1 ? many[0] : null;
-            if (!many.length) { pv.innerHTML = '<p class="note small">No flight legs found in that text. Paste the full recap page.</p>'; return; }
-            pv.innerHTML = parsed ? recapPreviewHTML(parsed, code) : recapsPreviewHTML(many, state, code);
-          });
-          // Several trips: add the ticked ones, each to the bid period it started in.
-          pv.addEventListener('click', (ev) => {
-            if (!ev.target.closest('[data-add-recaps]') || many.length < 2) return;
-            const picked = [...pv.querySelectorAll('[data-multi]:checked')].map((cb) => many[Number(cb.dataset.multi)]);
-            if (!picked.length) { toast('Tick at least one trip'); return; }
-            const targets = new Set();
-            for (const r of picked) {
-              const target = r.startDate ? periodFromISO(r.startDate) : code;
-              const fields = reconcileRecapTrip(recapToTrip(r), payContext(RULES, state.profile, target));
-              ensurePeriod(state, target).trips.push({ ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) });
-              targets.add(target);
-            }
-            if (!targets.has(code)) state.viewCode = [...targets].sort((a, b) => periodIndex(b) - periodIndex(a))[0];
-            close();
-            app.save();
-            toast(`Added ${picked.length} trip${picked.length === 1 ? '' : 's'} to ${[...targets].sort((a, b) => periodIndex(a) - periodIndex(b)).map(periodName).join(' and ')}`);
-            app.render();
-          });
-          const when = () => pv.querySelector('[data-fare-when]:checked')?.value || 'before';
-          pv.addEventListener('change', (ev) => {
-            if (!ev.target.matches('[data-fare-when]') || !parsed?.fares) return;
-            parsed.fares.forEach((f, i) => { const el = pv.querySelector(`[data-fare-credit="${i}"]`); if (el) el.textContent = $(fareCredit(f, when())); });
-          });
-          pv.addEventListener('click', (ev) => {
-            if (!ev.target.closest('[data-add-recap]') || !parsed?.ok) return;
-            const target = pv.querySelector('[data-recap-period]').value;
-            const fields = reconcileRecapTrip(recapToTrip(parsed), payContext(RULES, state.profile, target));
-            const trip = { ...fields, id: state.nextId++, dps: fields.dps.map((d) => ({ ...d, id: state.nextId++ })) };
-            ensurePeriod(state, target).trips.push(trip);
-            // Ticked deadhead fares go to the deviation bank, in the bid period of the deadhead's showtime (8.C.2.c).
-            const dev = ensureDev(state);
-            const w = when();
-            let banked = 0;
-            pv.querySelectorAll('[data-fare]:checked').forEach((cb) => {
-              const f = parsed.fares[Number(cb.dataset.fare)];
-              const cents = fareCredit(f, w);
-              dev.entries.push({
-                id: state.nextId++, kind: 'deadhead', code: f.date ? periodFromISO(f.date) : target, date: f.date || '',
-                route: `${f.org}-${f.dst}`, fare: (cents / 100).toFixed(2), changed: false,
-                baseline: (f.baselineCents / 100).toFixed(2), established: (f.establishedCents / 100).toFixed(2), notified: w,
-                fromTrip: trip.recap?.tripNo || null,
-              });
-              banked += cents;
-            });
-            openTrips.add(trip.id);
-            state.viewCode = target;
-            close();
-            app.save();
-            toast(`Added ${trip.label || 'trip'} to ${periodName(target)}${banked ? `, ${$(banked)} to your deviation bank` : ''}`);
-            app.render();
-          });
-        });
-        setTimeout(() => document.querySelector('.sheet textarea')?.focus(), 50);
+        openRecapSheet();
       } else if (a === 'price-trip') {
         openSheet("What's this trip worth?", `
           <p class="small muted">Copy the trip's page (open time, a draft offer, or a recap) and paste it here. It's read on this phone only.</p>
@@ -741,9 +777,10 @@ export default {
           ta.addEventListener('input', () => {
             r = ta.value.trim() ? parseRecaps(ta.value)[0] || null : null;
             if (!ta.value.trim()) pv.innerHTML = '';
-            else if (!r) pv.innerHTML = '<p class="note small">No flight legs found in that text. Paste the whole trip page.</p>';
+            else if (!r) pv.innerHTML = stubNote(ta.value);
             else draw();
           });
+          asStub(pv, ta, close);
           pv.addEventListener('change', (ev) => { if (ev.target.matches('[data-worth-as]') && r) { as = ev.target.value; draw(); } });
           pv.addEventListener('click', (ev) => {
             if (!ev.target.closest('[data-add-priced]') || !r) return;
@@ -764,16 +801,7 @@ export default {
         setTimeout(() => document.querySelector('.sheet textarea')?.focus(), 50);
       } else if (a === 'add-stub') {
         // The stub lands on the bid period and check it belongs to, wherever it was added from.
-        openStubSheet(app, {
-          onSave: (st) => {
-            const sc = stubCode(st);
-            const dest = ensurePeriod(state, sc);
-            dest.audit = { ...(dest.audit || { actual: '' }), check: stubWhich(st) };
-            state.viewCode = sc;
-            openFolds.add('audit');
-            pendingGo = 'stub';
-          },
-        });
+        openStubSheet(app, { onSave: onStubSave });
       } else if (a === 'claim-note') {
         const v = periodView(state, code);
         const st = stubsFor(state.stubs, code)[v.cur.audit?.check === 'end' ? 'end' : 'mid'];
@@ -822,15 +850,17 @@ export default {
         const list = Object.entries(ROW_TYPES)
           .filter(([k]) => !(p.trips.length && (k === 'perdiem' || k === 'override')))
           .filter(([k]) => !(p.payOnly && ruleAt(RULES, 'payOnlyLine', code).value.setAsideRows.includes(k)) && (k !== 'dayoff' || state.profile.role))
+          .filter(([k]) => k !== 'vacation' || (p.line || state.profile.line) === 'reserve')
           .map(([k, t]) => `<button type="button" class="pick" data-type="${k}"><b>${esc(t.label)}</b><span class="muted small">${esc(t.hint)}</span></button>`).join('');
         openSheet('Add to this bid period', `<div class="picks">${list}</div>`, (body, close) => {
           body.addEventListener('click', (ev) => {
             const pick = ev.target.closest('[data-type]');
             if (!pick) return;
             const r = newRow(state, pick.dataset.type);
+            if (r.type === 'vacation') r.count = '';
             p.rows.push(r);
             close();
-            const first = r.type === 'perdiem' ? 'tafbDom' : r.type === 'adjust' || r.type === 'other' ? 'label' : r.type === 'disrupt' ? 'kind' : 'hours';
+            const first = r.type === 'perdiem' ? 'tafbDom' : r.type === 'adjust' || r.type === 'other' ? 'label' : r.type === 'disrupt' ? 'kind' : r.type === 'vacation' ? 'count' : 'hours';
             rerender(`[data-row="${r.id}"] [data-f="${first}"]`);
           });
         });
@@ -848,6 +878,11 @@ export default {
       if (d.dataset?.fold) { if (d.open) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold); }
       if (d.dataset?.more) { const id = Number(d.dataset.more); if (d.open) openMore.add(id); else openMore.delete(id); }
     }, true);
+    if (app.pendingPaste?.kind === 'recap') {
+      const text = app.pendingPaste.text;
+      app.pendingPaste = null;
+      setTimeout(() => openRecapSheet(text), 0);
+    }
     if (pendingGo) {
       const want = pendingGo === 'stub' ? 'audit' : pendingGo;
       pendingGo = null;

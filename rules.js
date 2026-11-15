@@ -140,6 +140,16 @@ export const RULES = {
     },
   ],
 
+  rdayValue: [
+    {
+      effectiveFrom: 'JUL26',
+      value: { rDaysByWeeks: { 4: 15, 5: 19, 6: 23 } },
+      source: 'Sec. 4.C R-day value; 7.G.3.b, 7.G.3.d.vi and 4.H.2 (vacation on a reserve line)',
+      verified: true,
+      note: 'RLG is the R-day value times the R-days on a reserve line, so an R-day is worth RLG divided by those R-days: up to 15, 19 or 23 in a 4, 5 or 6 week bid period (the bid package has the number). On a reserve line each vacation day counts as an R-day: one R-day value comes out of the vacation bank and is credited toward RLG. The pilot is paid the full RLG',
+    },
+  ],
+
   draftPct: [
     {
       effectiveFrom: 'JUL26',

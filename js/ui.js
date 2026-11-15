@@ -56,9 +56,11 @@ export function explainHTML(ex) {
 /* --------------------------------------------------------------- sheet */
 
 let lastFocus = null;
+let closing = null; // the timer that empties a closing sheet; a sheet opened right after must not be wiped by it
 
 export function openSheet(title, html, onMount) {
   const root = document.getElementById('sheet');
+  if (closing) { clearTimeout(closing); closing = null; }
   lastFocus = document.activeElement;
   root.innerHTML = `
     <div class="sheet-backdrop" data-close></div>
@@ -82,7 +84,8 @@ export function closeSheet() {
   if (root.hidden) return;
   root.classList.remove('open');
   document.body.classList.remove('noscroll');
-  setTimeout(() => { root.hidden = true; root.innerHTML = ''; }, 160);
+  if (closing) clearTimeout(closing);
+  closing = setTimeout(() => { closing = null; root.hidden = true; root.innerHTML = ''; }, 160);
   if (lastFocus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
 }
 
