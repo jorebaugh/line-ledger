@@ -388,7 +388,8 @@ function recapPreviewHTML(r, code) {
     </div>`;
 }
 
-const tripExists = (state, r) => Object.values(state.periods).some((p) => (p.trips || []).some((t) => t.recap && t.recap.tripNo === r.tripNo && t.recap.startDate === r.startDate));
+// Same trip already added: same start date and trip number (a PDF trip sheet has no number, so the date decides).
+const tripExists = (state, r) => Object.values(state.periods).some((p) => (p.trips || []).some((t) => t.recap && t.recap.startDate === r.startDate && (t.recap.tripNo === r.tripNo || !t.recap.tripNo || !r.tripNo)));
 
 // Several recaps in one paste: tick the ones to add. Each goes to the bid period it started in.
 function recapsPreviewHTML(list, state, code) {

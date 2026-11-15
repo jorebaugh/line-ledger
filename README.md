@@ -57,6 +57,10 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
   pay 150%, hours past it pay 100%, all on top of guarantee (4.Q.7). The trip guarantee uses the eligibility
   first, then block override, then overage. A CMU hour inside eligibility counts as 1.5 paid hours, the way the
   stub's regular pay line carries it, so retiree health on the next 15th follows.
+- The PDF trip sheet reads too: the same trip copied out of a PDF reader, where every cell lands on its own line
+  (Flight, Date, Org, Dst, Eq, then scheduled and actual Dprt, Arrv, Blok, Turn, Lyovr, Duty). Scheduled and
+  actual are told apart by the times themselves, so missing blank cells don't matter. That sheet has no assign
+  code, so the trip comes in as a line trip with a note to set its type.
 - What's a trip worth: paste a trip (open time, draft offer or recap) and see what it adds on top of guarantee
   at 150%, 125% or 100%, the rough take-home, the take-home per hour and per day away, and the check it lands on.
 - Take-home by check: the 15th and the end-of-month check keep their own withholding percentage and other

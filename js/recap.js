@@ -59,6 +59,74 @@ export function splitRecaps(text) {
 // Every readable recap in a paste, in the order pasted.
 export const parseRecaps = (text) => splitRecaps(text).map((t) => parseRecap(t)).filter((r) => r.ok);
 
+/* ---- The PDF trip sheet: the same trip printed as a table and copied out of a PDF reader. Every cell lands
+   on its own line: Flight, Date, Org, Dst, Eq, then the scheduled Dprt, Arrv, Blok, Turn, Lyovr, Duty and the
+   actual ones. Empty cells may or may not leave a blank line, so cells are found by what they are. ---- */
+
+const SHEET_TIME = /^\d{1,3}:\d{2}$/;
+const SHEET_DATE = /^(\d{2})([A-Za-z]{3})(\d{2})$/;
+const SHEET_FLIGHT = /^[A-Z]{0,3}\d{1,5}[A-Z]?$/;
+// Signed gap between two clock times, in minutes, taking the short way round midnight.
+const clockGap = (a, b) => {
+  let d = (a - b) % 1440;
+  if (d > 720) d -= 1440;
+  if (d <= -720) d += 1440;
+  return d;
+};
+
+// Split a leg's run of times into scheduled and actual. Scheduled Dprt, Arrv, Blok come first. The actual
+// three start where the change in block equals the arrival slip less the departure slip, which holds for
+// any flown leg whatever the time zones. No such place: the leg has not been flown, all of it is scheduled.
+function splitSheetTimes(t) {
+  for (let j = 3; j <= Math.min(6, t.length - 3); j++) {
+    const slip = clockGap(t[j + 1], t[1]) - clockGap(t[j], t[0]);
+    if (Math.abs((t[j + 2] - t[2]) - slip) <= 2) return { s: t.slice(0, j), a: t.slice(j) };
+  }
+  return { s: t.slice(0, 6), a: [] };
+}
+
+// The cells after Blok are Turn, Lyovr, Duty. Duty shows on the last leg of a duty period, Turn between legs.
+function sheetExtras(x, lastOfDuty) {
+  if (x.length >= 3) return { turn: x[0], lo: x[1], duty: x[2] };
+  if (x.length === 2) return lastOfDuty ? { turn: null, lo: x[0], duty: x[1] } : { turn: x[0], lo: x[1], duty: null };
+  if (x.length === 1) return lastOfDuty ? { turn: null, lo: null, duty: x[0] } : { turn: x[0], lo: null, duty: null };
+  return { turn: null, lo: null, duty: null };
+}
+
+export function sheetLegs(text) {
+  const tok = String(text || '').split(/\s+/).filter(Boolean);
+  const raw = [];
+  for (let i = 0; i + 3 < tok.length; i++) {
+    if (/^HOTEL$/i.test(tok[i]) && raw.length) raw[raw.length - 1].hotel = true;
+    const d = SHEET_DATE.exec(tok[i + 1]);
+    if (!d || !SHEET_FLIGHT.test(tok[i]) || !/^[A-Z]{3}$/.test(tok[i + 2]) || !/^[A-Z]{3}$/.test(tok[i + 3])) continue;
+    let j = i + 4;
+    let eq = null;
+    if (tok[j] && !SHEET_TIME.test(tok[j]) && /^[A-Z0-9]{2,4}$/.test(tok[j])) eq = tok[j++];
+    const times = [];
+    while (tok[j] && SHEET_TIME.test(tok[j])) times.push(parseHours(tok[j++]));
+    if (times.length < 3) continue;
+    raw.push({ flt: tok[i], date: isoFrom(d[1], d[2], d[3]), org: tok[i + 2], dst: tok[i + 3], eq, times, hotel: false });
+    i = j - 1;
+  }
+  return raw.map((l, k) => {
+    const { s: sch, a: act } = splitSheetTimes(l.times);
+    const lastOfDuty = l.hotel || k === raw.length - 1;
+    const xs = sheetExtras(sch.slice(3), lastOfDuty);
+    const xa = sheetExtras(act.slice(3), lastOfDuty);
+    // A deadhead on another airline carries that airline's flight number; the sheet has no deadhead column.
+    const deadhead = /^[A-Z]{2}/.test(l.flt) || l.eq === 'DH';
+    const ground = l.org === l.dst;
+    return {
+      flt: l.flt, deadhead, ground, revenue: !deadhead && !ground, date: l.date, org: l.org, dst: l.dst, eq: l.eq,
+      blockS: sch[2] ?? null, blockA: act.length ? act[2] : null,
+      dutyS: xs.duty, dutyA: act.length ? xa.duty : null,
+      loS: l.hotel ? xs.lo : null, loA: l.hotel && act.length ? xa.lo : null,
+      turn: xs.turn, layoverAfter: l.hotel,
+    };
+  });
+}
+
 export function parseRecap(text) {
   const s = String(text || '').replace(/\r/g, '');
   const warnings = [];
@@ -131,6 +199,25 @@ export function parseRecap(text) {
       layoverAfter: /\n\s*Hotel\b/.test(seg) || rest.length >= 2,
     };
   });
+  if (!out.legs.length) {
+    const sheet = sheetLegs(s);
+    if (sheet.length) {
+      out.legs = sheet;
+      out.layout = 'sheet';
+      out.startDate = out.startDate || sheet[0].date;
+      out.base = out.base || sheet[0].org;
+      out.equipment = out.equipment || sheet[0].eq || undefined;
+      // Trip totals: the six cells under "Away Block Pay Away Block Pay" (scheduled, then actual when flown).
+      const tot = s.match(/Away\s+Block\s+Pay\s+(?:Away\s+Block\s+Pay\s+)?(\d+:\d{2})\s+(\d+:\d{2})\s+(\d+:\d{2})(?:\s+(\d+:\d{2})\s+(\d+:\d{2})\s+(\d+:\d{2}))?/i);
+      if (tot && !out.scheduled) {
+        out.scheduled = { away: parseHours(tot[1]), block: parseHours(tot[2]), pay: parseHours(tot[3]) };
+        if (tot[4]) out.actual = { away: parseHours(tot[4]), block: parseHours(tot[5]), pay: parseHours(tot[6]) };
+      }
+      // Seat only: the first cell under the crew header. The employee number and name next to it are not read.
+      const pos = s.match(/Last\s+Name\s+(CAP|CA|FO|F\/O|RFO|RF2|SO)\b/);
+      if (pos) out.seat = pos[1];
+    }
+  }
   if (!out.legs.length) warnings.push('No flight legs found.');
 
   // Duty periods end at a layover or at the last leg.
@@ -253,6 +340,7 @@ export function recapToTrip(r, rules = RULES) {
   const pc = payCode(r.assignCode, rules, cc.code);
   const assign = pc ? pc.kind : 'line';
   const notes = [];
+  if (r.layout === 'sheet') notes.push('Read from the PDF trip sheet, which has no assign code, so it comes in as a line trip. Set the type of trip if it was something else (CMU, VLT, reserve).');
   if (r.assignCode && !pc) notes.push(`Assign code ${r.assignCode} isn't in the app's list, so it's treated as a line trip. Change it if that's wrong.`);
   else if (pc && r.assignCode !== 'TRP') notes.push(`${r.assignCode}: ${pc.text} (Sec. ${pc.sec}${pc.confirm ? ', confirm' : ''})`);
   if (r.scheduled) {
