@@ -53,6 +53,10 @@ Independent tool. Not affiliated with any airline or union. Estimates only. Not 
   for that bid period (RLG, and credit over RLG at 150%, 4.H.7). Vacation on a reserve line (`rdayValue`): each
   vacation day counts as an R-day, one R-day value (RLG ÷ R-days on the line) toward RLG, with no pay of its own
   (4.C, 7.G.3.b, 7.G.3.d.vi, 4.H.2).
+- CMU with eligibility running out part way: a CMU trip takes "CMU credit you had left". Credit hours up to it
+  pay 150%, hours past it pay 100%, all on top of guarantee (4.Q.7). The trip guarantee uses the eligibility
+  first, then block override, then overage. A CMU hour inside eligibility counts as 1.5 paid hours, the way the
+  stub's regular pay line carries it, so retiree health on the next 15th follows.
 - What's a trip worth: paste a trip (open time, draft offer or recap) and see what it adds on top of guarantee
   at 150%, 125% or 100%, the rough take-home, the take-home per hour and per day away, and the check it lands on.
 - Take-home by check: the 15th and the end-of-month check keep their own withholding percentage and other

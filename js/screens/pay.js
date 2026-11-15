@@ -279,6 +279,8 @@ function tripCard(t, code, payOnly = false) {
       <label class="f"><span>Type of trip</span>
         <select data-f="assign">${kinds.map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <p class="hint">Pay codes: ${esc(assignInfo(t.assign, payOnly).codes)}${payOnly ? '. Paid on top of your pay-only line.' : ''}</p>
+      ${kind === 'cmu' ? `${hoursInput('cmuElig', t.cmuElig, 'blank = the whole trip', 'CMU credit you had left, in credit hours')}
+      <p class="hint">CMU pays 150% only up to your compensatory make-up eligibility. Hours past it pay 100% (4.Q.7). Leave blank if the whole trip was inside it.</p>` : ''}
       <div class="f"><span>Flying ${confirmPill}</span>${seg(`intl-${id}`, [['0', 'Domestic'], ['1', 'International']], t.intl ? '1' : '0', { attrs: 'data-f="intl"' })}</div>
       ${hoursInput('sched', t.sched, 'e.g. 30:00', 'Credit hours (trip guarantee)')}
       ${hoursInput('away', t.away, 'e.g. 96:00', 'Hours away from base (TAFB)')}

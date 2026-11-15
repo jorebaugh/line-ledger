@@ -364,15 +364,37 @@ export function calcTrip(trip, ctx) {
   const tripPct = makeUp ? ctx.rule.payOnly.value.makeUpPct : tripPctRule ? tripPctRule.value : 100;
   const toward = a === 'reserve' ? 'RLG' : 'BLG';
 
+  // CMU pays 150% only up to the pilot's compensatory make-up eligibility; credit hours past it pay
+  // 100%, still on top of guarantee (4.Q.7). trip.cmuElig is the eligibility left for this trip; blank
+  // means the whole trip is inside it. The trip guarantee uses it first, then block override, then overage.
+  // On the stub a CMU hour inside eligibility shows as 1.5 hours on the regular pay line, so its paid
+  // hours (which retiree health is charged on) carry the premium too.
+  const cmuElig = a === 'cmu' ? parseHours(trip.cmuElig) : null;
+  let eligLeft = cmuElig;
+  const premiumMin = (min) => (a === 'cmu' ? Math.round((min * tripPct) / 100) : min);
+  const payLine = (label, min, how, srcs, extra = {}) => {
+    if (eligLeft == null || eligLeft >= min) {
+      if (eligLeft != null) eligLeft -= min;
+      items.push(item('onTop', label, `${H(min)} CH${how} × ${$(R)} × ${tripPct}%`, payCents(min, R, tripPct), srcs, { paidMin: premiumMin(min), ...extra }));
+      return;
+    }
+    const inside = eligLeft;
+    const past = min - inside;
+    eligLeft = 0;
+    if (inside > 0) items.push(item('onTop', `${label}, inside CMU eligibility`, `${H(inside)} CH × ${$(R)} × ${tripPct}%`, payCents(inside, R, tripPct), srcs, { paidMin: premiumMin(inside), ...extra }));
+    items.push(item('onTop', `${label}, past CMU eligibility`, `${H(past)} CH × ${$(R)} × 100%`, payCents(past, R, 100), srcs, { paidMin: past, ...(inside > 0 ? {} : extra) }));
+  };
+
   if (sched <= 0) notes.push('Enter the trip guarantee (scheduled credit hours)');
   if (schedInfo.fromDps) notes.push(`Trip guarantee taken from your duty period credits: ${H(sched)}`);
+  if (a === 'cmu' && cmuElig == null) notes.push('Paid at 150% on the whole trip. If your CMU eligibility ran out part way, enter the hours you had left (4.Q.7)');
 
   // Trip guarantee
   if (sched > 0) {
     if ((a === 'line' && !makeUp) || a === 'reserve') {
       items.push(item('toward', 'Trip guarantee', `${H(sched)} CH counts toward ${toward}`, 0, [a === 'reserve' ? ctx.rule.reserve : ctx.rule.minG], { minutes: sched }));
     } else {
-      items.push(item('onTop', 'Trip guarantee', `${H(sched)} CH × ${$(R)} × ${tripPct}%`, payCents(sched, R, tripPct), [ctx.rule.rates, tripPctRule], { paidMin: sched }));
+      payLine('Trip guarantee', sched, '', [ctx.rule.rates, tripPctRule]);
     }
   }
 
@@ -386,7 +408,7 @@ export function calcTrip(trip, ctx) {
     if (a === 'reserve') {
       items.push(item('toward', 'Block override (BKO)', `${H(bko.min)} CH${how} credited toward RLG`, 0, srcs, { minutes: bko.min, detail }));
     } else {
-      items.push(item('onTop', 'Block override (BKO)', `${H(bko.min)} CH${how} × ${$(R)} × ${tripPct}%`, payCents(bko.min, R, tripPct), [ctx.rule.rates, ...srcs, tripPctRule], { paidMin: bko.min, detail }));
+      payLine('Block override (BKO)', bko.min, how, [ctx.rule.rates, ...srcs, tripPctRule], { detail });
     }
   }
 
@@ -403,7 +425,7 @@ export function calcTrip(trip, ctx) {
     } else if (ovgLong) {
       items.push(...overageItems(ovg, ctx));
     } else {
-      items.push(item('onTop', autoOvg ? 'Overage (actual credit above OSC)' : 'Overage, 2 hrs or less into days off', `${H(ovg)} CH × ${$(R)} × ${tripPct}%`, payCents(ovg, R, tripPct), [ctx.rule.rates, ctx.rule.overage, ...ovgSrc, tripPctRule], { paidMin: ovg }));
+      payLine(autoOvg ? 'Overage (actual credit above OSC)' : 'Overage, 2 hrs or less into days off', ovg, '', [ctx.rule.rates, ctx.rule.overage, ...ovgSrc, tripPctRule]);
     }
   }
 
